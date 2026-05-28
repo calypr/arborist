@@ -11,9 +11,8 @@ import (
 // multiInsertStmt generates a string for a SQL command to insert multiple rows
 // into a table.
 //
-//     multiInsertStmt("table(col1, col2)", 2)
-//     == "INSERT INTO table(col1, col2) VALUES ($1, $2), ($3, $4)"
-//
+//	multiInsertStmt("table(col1, col2)", 2)
+//	== "INSERT INTO table(col1, col2) VALUES ($1, $2), ($3, $4)"
 func multiInsertStmt(table string, n_rows int) string {
 	parse_values := strings.Split(table, "(")
 	half_parsed := parse_values[len(parse_values)-1]

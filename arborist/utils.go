@@ -12,10 +12,11 @@ import (
 // **Example**
 //
 // ```go
-// type City struct {
-//     Name       string `json:"name"`
-//     Population int    `json:"population,omitempty"`
-// }
+//
+//	type City struct {
+//	    Name       string `json:"name"`
+//	    Population int    `json:"population,omitempty"`
+//	}
 //
 // c := City{"Chicago", 2700000}
 // structJSONFields(c)
