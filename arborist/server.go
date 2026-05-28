@@ -115,6 +115,11 @@ func (server *Server) MakeRouter(out io.Writer) http.Handler {
 	router.Handle("/policy/{policyID}", http.HandlerFunc(server.handlePolicyRead)).Methods("GET")
 	router.Handle("/policy/{policyID}", http.HandlerFunc(server.handlePolicyDelete)).Methods("DELETE")
 	router.Handle("/bulk/policy", http.HandlerFunc(server.parseJSON(server.handleBulkPoliciesOverwrite))).Methods("PUT")
+	router.Handle("/ownership/descendant", http.HandlerFunc(server.parseJSON(server.handleOwnershipCreateDescendant))).Methods("POST")
+	router.Handle("/ownership/owner", http.HandlerFunc(server.parseJSON(server.handleOwnershipAddOwner))).Methods("POST")
+	router.Handle("/ownership/owner", http.HandlerFunc(server.parseJSON(server.handleOwnershipRemoveOwner))).Methods("DELETE")
+	router.Handle("/ownership/user", http.HandlerFunc(server.parseJSON(server.handleOwnershipGrantUser))).Methods("POST")
+	router.Handle("/ownership/user", http.HandlerFunc(server.parseJSON(server.handleOwnershipRevokeUser))).Methods("DELETE")
 
 	router.Handle("/resource", http.HandlerFunc(server.handleResourceList)).Methods("GET")
 	router.Handle("/resource", http.HandlerFunc(server.parseJSON(server.handleResourceCreate))).Methods("POST", "PUT")
@@ -736,10 +741,12 @@ func (server *Server) handlePolicyList(w http.ResponseWriter, r *http.Request) {
 
 	// query policies
 	policies := []Policy{}
+	policyOutputs := []policyOut{}
 	allPoliciesRoleIDs := []string{}
 	for _, policyFromQuery := range policiesFromQuery {
 		policy := policyFromQuery.standardize()
 		policies = append(policies, policy)
+		policyOutputs = append(policyOutputs, policyFromQuery.standardizeOut())
 		allPoliciesRoleIDs = append(allPoliciesRoleIDs, policy.RoleIDs...)
 	}
 
@@ -786,9 +793,9 @@ func (server *Server) handlePolicyList(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// return non-expanded policies
 		result := struct {
-			Policies []Policy `json:"policies"`
+			Policies []policyOut `json:"policies"`
 		}{
-			Policies: policies,
+			Policies: policyOutputs,
 		}
 		_ = jsonResponseFrom(result, http.StatusOK).write(w, r)
 	}
@@ -899,7 +906,7 @@ func (server *Server) handlePolicyRead(w http.ResponseWriter, r *http.Request) {
 		_ = errResponse.write(w, r)
 		return
 	}
-	policy := policyFromQuery.standardize()
+	policy := policyFromQuery.standardizeOut()
 	_ = jsonResponseFrom(policy, http.StatusOK).write(w, r)
 }
 

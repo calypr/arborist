@@ -17,6 +17,17 @@ type Policy struct {
 	RoleIDs       []string `json:"role_ids"`
 }
 
+type policyOut struct {
+	Name          string   `json:"id"`
+	Description   string   `json:"description"`
+	ResourcePaths []string `json:"resource_paths"`
+	RoleIDs       []string `json:"role_ids"`
+	Generated     bool     `json:"generated,omitempty"`
+	Protected     bool     `json:"protected,omitempty"`
+	GeneratedKind string   `json:"generated_kind,omitempty"`
+	TemplateName  string   `json:"template_name,omitempty"`
+}
+
 // expanded policies need their own struct so that unused RoleIDs/Roles
 // fields can be excluded from the JSON response
 type ExpandedPolicy struct {
@@ -28,7 +39,7 @@ type ExpandedPolicy struct {
 
 // UnmarshalJSON defines the way that a `Policy` gets read when unmarshalling:
 //
-//     json.Unmarshal(bytes, &policy)
+//	json.Unmarshal(bytes, &policy)
 //
 // We implement this method to add some additional processing and error
 // checking, for example to reject inputs which are missing required fields.
@@ -70,6 +81,10 @@ type PolicyFromQuery struct {
 	Description   *string        `db:"description" json:"description,omitempty"`
 	ResourcePaths pq.StringArray `db:"resource_paths" json:"resource_paths"`
 	RoleIDs       pq.StringArray `db:"role_ids" json:"role_ids"`
+	Generated     sql.NullBool   `db:"generated" json:"generated,omitempty"`
+	Protected     sql.NullBool   `db:"protected" json:"protected,omitempty"`
+	GeneratedKind sql.NullString `db:"generated_kind" json:"generated_kind,omitempty"`
+	TemplateName  sql.NullString `db:"template_name" json:"template_name,omitempty"`
 }
 
 func (policyFromQuery *PolicyFromQuery) standardize() Policy {
@@ -88,21 +103,54 @@ func (policyFromQuery *PolicyFromQuery) standardize() Policy {
 	return policy
 }
 
+func (policyFromQuery *PolicyFromQuery) standardizeOut() policyOut {
+	policy := policyFromQuery.standardize()
+	out := policyOut{
+		Name:          policy.Name,
+		Description:   policy.Description,
+		ResourcePaths: policy.ResourcePaths,
+		RoleIDs:       policy.RoleIDs,
+	}
+	if policyFromQuery.Generated.Valid {
+		out.Generated = policyFromQuery.Generated.Bool
+	}
+	if policyFromQuery.Protected.Valid {
+		out.Protected = policyFromQuery.Protected.Bool
+	}
+	if policyFromQuery.GeneratedKind.Valid {
+		out.GeneratedKind = policyFromQuery.GeneratedKind.String
+	}
+	if policyFromQuery.TemplateName.Valid {
+		out.TemplateName = policyFromQuery.TemplateName.String
+	}
+	return out
+}
+
 func policyWithName(db *sqlx.DB, name string) (*PolicyFromQuery, error) {
 	stmt := `
 		SELECT
 			policy.id,
 			policy.name,
 			policy.description,
+			(generated_policy_metadata.policy_id IS NOT NULL) AS generated,
+			generated_policy_metadata.protected AS protected,
+			generated_policy_metadata.kind AS generated_kind,
+			generated_policy_metadata.template_name AS template_name,
 			array_remove(array_agg(DISTINCT resource.path), NULL) AS resource_paths,
 			array_remove(array_agg(DISTINCT role.name), NULL) AS role_ids
 		FROM policy
+		LEFT JOIN generated_policy_metadata ON policy.id = generated_policy_metadata.policy_id
 		LEFT JOIN policy_resource ON policy.id = policy_resource.policy_id
 		LEFT JOIN resource ON resource.id = policy_resource.resource_id
 		LEFT JOIN policy_role on policy.id = policy_role.policy_id
 		LEFT JOIN role on role.id = policy_role.role_id
 		WHERE policy.name = $1
-		GROUP BY policy.id
+		GROUP BY
+			policy.id,
+			generated_policy_metadata.policy_id,
+			generated_policy_metadata.protected,
+			generated_policy_metadata.kind,
+			generated_policy_metadata.template_name
 		LIMIT 1
 	`
 	policies := []PolicyFromQuery{}
@@ -123,14 +171,24 @@ func listPoliciesFromDb(db *sqlx.DB) ([]PolicyFromQuery, error) {
 			policy.id,
 			policy.name,
 			policy.description,
+			(generated_policy_metadata.policy_id IS NOT NULL) AS generated,
+			generated_policy_metadata.protected AS protected,
+			generated_policy_metadata.kind AS generated_kind,
+			generated_policy_metadata.template_name AS template_name,
 			array_remove(array_agg(DISTINCT resource.path), NULL) AS resource_paths,
 			array_remove(array_agg(DISTINCT role.name), NULL) AS role_ids
 		FROM policy
+		LEFT JOIN generated_policy_metadata ON policy.id = generated_policy_metadata.policy_id
 		LEFT JOIN policy_resource ON policy.id = policy_resource.policy_id
 		LEFT JOIN resource ON resource.id = policy_resource.resource_id
 		LEFT JOIN policy_role on policy.id = policy_role.policy_id
 		LEFT JOIN role on role.id = policy_role.role_id
-		GROUP BY policy.id
+		GROUP BY
+			policy.id,
+			generated_policy_metadata.policy_id,
+			generated_policy_metadata.protected,
+			generated_policy_metadata.kind,
+			generated_policy_metadata.template_name
 	`
 	var policies []PolicyFromQuery
 	err := db.Select(&policies, stmt)
@@ -291,6 +349,14 @@ func (policy *Policy) createInDb(tx *sqlx.Tx) *ErrorResponse {
 }
 
 func (policy *Policy) deleteInDb(tx *sqlx.Tx) *ErrorResponse {
+	protected, errResponse := generatedPolicyIsProtected(tx, policy.Name)
+	if errResponse != nil {
+		return errResponse
+	}
+	if protected {
+		msg := fmt.Sprintf("cannot delete protected generated policy: %s", policy.Name)
+		return newErrorResponse(msg, 403, nil)
+	}
 	stmt := "DELETE FROM policy WHERE name = $1"
 	_, err := tx.Exec(stmt, policy.Name)
 	if err != nil {
@@ -303,6 +369,14 @@ func (policy *Policy) deleteInDb(tx *sqlx.Tx) *ErrorResponse {
 
 func (policy *Policy) updateInDb(tx *sqlx.Tx) *ErrorResponse {
 	// We do not allow updates to policy name (or id).
+	protected, protectedErr := generatedPolicyIsProtected(tx, policy.Name)
+	if protectedErr != nil {
+		return protectedErr
+	}
+	if protected {
+		msg := fmt.Sprintf("cannot overwrite protected generated policy: %s", policy.Name)
+		return newErrorResponse(msg, 403, nil)
+	}
 
 	errResponse := policy.validate()
 	if errResponse != nil {

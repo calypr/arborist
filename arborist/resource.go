@@ -146,7 +146,7 @@ func (resourceFromQuery *ResourceFromQuery) standardize() ResourceOut {
 // FormatPathForDb takes a front-end version of a resource path and transforms
 // it to its database version. Inverse of `formatDbPath`.
 //
-//     FormatPathForDb("/a/b/c") == "a.b.c"
+//	FormatPathForDb("/a/b/c") == "a.b.c"
 func FormatPathForDb(path string) string {
 	// -1 means replace everything
 	result := strings.TrimLeft(strings.Replace(UnderscoreEncode(path), "/", ".", -1), ".")
@@ -156,7 +156,7 @@ func FormatPathForDb(path string) string {
 // formatDbPath takes a path from a resource in the database and transforms it
 // to the front-end version of the resource path. Inverse of `FormatPathForDb`.
 //
-//     formatDbPath("a.b.c") == "/a/b/c"
+//	formatDbPath("a.b.c") == "/a/b/c"
 func formatDbPath(path string) string {
 	// -1 means replace everything
 	return UnderscoreDecode("/" + strings.Replace(path, ".", "/", -1))
@@ -300,6 +300,14 @@ func (resource *ResourceIn) deleteInDb(tx *sqlx.Tx) *ErrorResponse {
 	if resource.Path == "" {
 		msg := "resource missing required field `path`"
 		return newErrorResponse(msg, 400, nil)
+	}
+	protected, errResponse := resourceHasProtectedOwnership(tx, resource.Path)
+	if errResponse != nil {
+		return errResponse
+	}
+	if protected {
+		msg := fmt.Sprintf("cannot delete resource with protected generated ownership: %s", resource.Path)
+		return newErrorResponse(msg, 403, nil)
 	}
 	stmt := "DELETE FROM resource WHERE path = $1"
 	_, err := tx.Exec(stmt, FormatPathForDb(resource.Path))
