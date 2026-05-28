@@ -29,6 +29,12 @@ The key documentation is below. Additional documentation can be found in the [/d
 
 The YAML file containing the OpenAPI documentation can be found in the `docs` folder.
 
+## Dynamic Resource Ownership
+
+This fork adds GitHub-style descendant ownership for dynamic Calypr project
+creation. See [docs/descendant_ownership.md](docs/descendant_ownership.md) for
+the architecture, API contracts, invariants, and operational notes.
+
 ## Setup
 
 ### Quickstart
