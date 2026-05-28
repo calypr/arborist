@@ -149,13 +149,13 @@ both work as expected.
 In the arborist deployments used in Gen3, at the time of writing, the easiest
 way to apply migration scripts is a command such as the following:
 ```bash
-gen3 psql arborist -f <(g3kubectl exec $(gen3 pod arborist) -- cat /go/src/github.com/uc-cdis/arborist/migrations/.../up.sql)
+gen3 psql arborist -f <(g3kubectl exec $(gen3 pod arborist) -- cat /go/src/github.com/calypr/arborist/migrations/.../up.sql)
 ```
 For another example, to redo the `2019-06-04T173047Z_resource_triggers`
 migration, these commands would work:
 ```
-gen3 psql arborist -f <(g3kubectl exec $(gen3 pod arborist) -- cat /go/src/github.com/uc-cdis/arborist/migrations/2019-06-04T173047Z_resource_triggers/down.sql)
-gen3 psql arborist -f <(g3kubectl exec $(gen3 pod arborist) -- cat /go/src/github.com/uc-cdis/arborist/migrations/2019-06-04T173047Z_resource_triggers/up.sql)
+gen3 psql arborist -f <(g3kubectl exec $(gen3 pod arborist) -- cat /go/src/github.com/calypr/arborist/migrations/2019-06-04T173047Z_resource_triggers/down.sql)
+gen3 psql arborist -f <(g3kubectl exec $(gen3 pod arborist) -- cat /go/src/github.com/calypr/arborist/migrations/2019-06-04T173047Z_resource_triggers/up.sql)
 ```
 
 ### Working with the Database

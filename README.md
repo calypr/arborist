@@ -1,7 +1,5 @@
 # Arborist
 
-![GitHub release](https://img.shields.io/github/release/uc-cdis/arborist.svg) [![Build Status](https://travis-ci.com/uc-cdis/arborist.svg?branch=master)](https://travis-ci.com/uc-cdis/arborist) [![Coverage Status](https://coveralls.io/repos/github/uc-cdis/arborist/badge.svg)](https://coveralls.io/github/uc-cdis/arborist)
-
 Arborist is an attribute-based access control (ABAC) policy engine, designed for use with
 the [Gen3 stack](https://gen3.org/). Arborist tracks resources requiring access
 control, along with actions which users may perform to operate on these
@@ -27,7 +25,7 @@ The key documentation is below. Additional documentation can be found in the [/d
 
 ## API documentation
 
-[OpenAPI documentation available here.](http://petstore.swagger.io/?url=https://raw.githubusercontent.com/uc-cdis/arborist/master/docs/openapi.yaml)
+[OpenAPI documentation available here.](http://petstore.swagger.io/?url=https://raw.githubusercontent.com/calypr/arborist/master/docs/openapi.yaml)
 
 The YAML file containing the OpenAPI documentation can be found in the `docs` folder.
 
@@ -43,10 +41,10 @@ You will need these:
 
 ```bash
 # clone it
-go get -u github.com/uc-cdis/arborist
+go get -u github.com/calypr/arborist
 
 # cd into wherever arborist is cloned (this is the default)
-cd ~/go/src/github.com/uc-cdis/arborist
+cd ~/go/src/github.com/calypr/arborist
 
 # build the code
 make
@@ -73,7 +71,7 @@ createdb
 ### Quickstart with Helm
 
 You can now deploy individual services via Helm! 
-Please refer to the Helm quickstart guide HERE (https://github.com/uc-cdis/arborist/blob/master/docs/quickstart_helm.md)
+Please refer to the Helm quickstart guide HERE (https://github.com/calypr/arborist/blob/master/docs/quickstart_helm.md)
 
 ### Building With Docker
 
@@ -96,7 +94,7 @@ documentation for more details on how to use Docker.
 Clone/Build/Install all-in-one command:
 
 ```bash
-go get -u github.com/uc-cdis/arborist
+go get -u github.com/calypr/arborist
 ```
 
 The cloned source code can be found under `$GOPATH`, usually `~/go/` if not set.

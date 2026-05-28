@@ -23,7 +23,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/uc-cdis/arborist/arborist"
+	"github.com/calypr/arborist/arborist"
 )
 
 // For testing we use a mock JWT decoder which will always just return all the

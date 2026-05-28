@@ -1,0 +1,55 @@
+name: Go CI
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      PGDATABASE: arborist_test
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGHOST: localhost
+      PGPORT: 5432
+      PGSSLMODE: disable
+      GOFLAGS: -buildvcs=false
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_DB: arborist_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+          cache: true
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Set up database
+        run: ./migrations/latest
+
+      - name: Run tests
+        run: go test ./arborist -count=1

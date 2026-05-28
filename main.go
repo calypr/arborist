@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/calypr/arborist/arborist"
 	"github.com/jmoiron/sqlx"
-	"github.com/uc-cdis/arborist/arborist"
 	"github.com/uc-cdis/go-authutils/authutils"
 )
 
