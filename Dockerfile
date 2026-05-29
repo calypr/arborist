@@ -2,7 +2,6 @@ FROM golang:1.26.2-alpine AS build-deps
 
 ENV CGO_ENABLED=0
 ENV GOOS=linux
-ENV GOARCH=amd64
 
 RUN apk add --no-cache ca-certificates git
 
