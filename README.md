@@ -35,6 +35,12 @@ This fork adds GitHub-style descendant ownership for dynamic Calypr project
 creation. See [docs/descendant_ownership.md](docs/descendant_ownership.md) for
 the architecture, API contracts, invariants, and operational notes.
 
+This fork also adds Arborist access mutation macros for direct owner/admin
+project access management. See
+[docs/access_mutation_macros.md](docs/access_mutation_macros.md) for the
+technical rationale behind `/access/user`, legacy RBAC compatibility, and why
+the macro lives in Arborist instead of Requestor.
+
 ## Setup
 
 ### Quickstart

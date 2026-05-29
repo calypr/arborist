@@ -16,6 +16,13 @@ endpoint is a semantic macro over those primitives: one request becomes a
 consistent set of normal Arborist RBAC objects with provenance and safety
 metadata.
 
+This document focuses on dynamic resource creation and ownership
+materialization. The companion document
+[access_mutation_macros.md](access_mutation_macros.md) covers the later access
+management macro layer used by organization/project settings pages to add and
+remove configured project roles across both generated ownership bindings and
+legacy direct RBAC grants.
+
 ## Problem
 
 Classic Arborist assumes resources already exist before authorization decisions
@@ -138,12 +145,6 @@ Generated policy names are deterministic:
 generated.<kind>.<resource.path.with.dots>.<role>
 ```
 
-Example:
-
-```text
-generated.owner.programs.Ellrott_Lab.projects.git_drs_test.owner
-```
-
 These are real policies and show up through policy list/read APIs with generated
 metadata.
 
@@ -154,87 +155,52 @@ they are exposed as `/authz/ownership/*`.
 
 ### Create Missing Descendant
 
-```http
-POST /ownership/descendant
-```
+Route: `POST /ownership/descendant`
 
-Request:
+Request fields:
 
-```json
-{
-  "parent_path": "/programs/Ellrott_Lab/projects",
-  "name": "git_drs_test",
-  "template": "gen3-project",
-  "description": "GitHub-linked Calypr project"
-}
-```
+- `parent_path`
+- `name`
+- `template`
+- `description`
 
 Behavior:
 
-1. Decode the caller from the bearer token.
-2. Verify `create-descendant` on `parent_path`.
-3. Select an ownership template matching `parent_path` and optional `template`.
-4. Reject if the child resource already exists.
-5. In one transaction:
-   - create the resource
-   - optionally create the configured child container
-   - ensure generated owner/admin roles and policies
-   - bind the creator to the generated owner policy
-   - bind protected admin recovery groups
-   - record generated policy and binding provenance
-6. Return the created resource and generated policy names.
-
-Program creation example:
-
-```json
-{
-  "parent_path": "/programs",
-  "name": "Ellrott_Lab",
-  "template": "gen3-program"
-}
-```
-
-Project creation example:
-
-```json
-{
-  "parent_path": "/programs/Ellrott_Lab/projects",
-  "name": "git_drs_test",
-  "template": "gen3-project"
-}
-```
+- Decode the caller from the bearer token.
+- Verify `create-descendant` on `parent_path`.
+- Select an ownership template matching `parent_path` and optional `template`.
+- Reject if the child resource already exists.
+- Create the resource, generated policies, creator owner binding, admin
+  recovery bindings, and provenance in one transaction.
+- Return the created resource and generated policy names.
 
 ### Add Owner
 
-```http
-POST /ownership/owner
-```
+Route: `POST /ownership/owner`
 
 Adds another owner binding for a generated resource. The caller must already
 control ownership for that resource.
 
 ### Remove Owner
 
-```http
-DELETE /ownership/owner
-```
+Route: `DELETE /ownership/owner`
 
 Removes an owner binding. Arborist rejects the operation if it would leave the
 resource without any owner and without protected admin recovery.
 
 ### Delegate User Access
 
-```http
-POST /ownership/user
-DELETE /ownership/user
-```
+Routes: `POST /ownership/user`, `DELETE /ownership/user`
 
 Adds or removes a non-admin generated user binding for a delegable role. The
 role must be listed in the template's `delegable_roles`.
 
 The initial Calypr project-creation wizard only calls
-`POST /ownership/descendant`. The owner/user endpoints are intentionally present
-for later collaborator management UI.
+`POST /ownership/descendant`. The owner endpoints are used by owner-management
+UI. For ordinary project role management, prefer the access macro API described
+in [access_mutation_macros.md](access_mutation_macros.md). That API gives the
+frontend a stable RBAC-shaped interface and lets Arborist decide whether a grant
+is ownership-generated or old-style direct RBAC.
 
 ## Calypr Project Creation Flow
 

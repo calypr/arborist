@@ -121,6 +121,8 @@ func (server *Server) MakeRouter(out io.Writer) http.Handler {
 	router.Handle("/ownership/owner", http.HandlerFunc(server.parseJSON(server.handleOwnershipRemoveOwner))).Methods("DELETE")
 	router.Handle("/ownership/user", http.HandlerFunc(server.parseJSON(server.handleOwnershipGrantUser))).Methods("POST")
 	router.Handle("/ownership/user", http.HandlerFunc(server.parseJSON(server.handleOwnershipRevokeUser))).Methods("DELETE")
+	router.Handle("/access/user", http.HandlerFunc(server.parseJSON(server.handleAccessGrantUser))).Methods("POST")
+	router.Handle("/access/user", http.HandlerFunc(server.parseJSON(server.handleAccessRevokeUser))).Methods("DELETE")
 
 	router.Handle("/resource", http.HandlerFunc(server.handleResourceList)).Methods("GET")
 	router.Handle("/resource", http.HandlerFunc(server.parseJSON(server.handleResourceCreate))).Methods("POST", "PUT")

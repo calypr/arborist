@@ -222,6 +222,11 @@ func removeDelegatedUserBinding(tx *sqlx.Tx, resourcePath string, username strin
 }
 
 func deleteGeneratedUserBinding(tx *sqlx.Tx, resourcePath string, username string, kind string, roleID string) *ErrorResponse {
+	_, errResponse := deleteGeneratedUserBindingWithCount(tx, resourcePath, username, kind, roleID)
+	return errResponse
+}
+
+func deleteGeneratedUserBindingWithCount(tx *sqlx.Tx, resourcePath string, username string, kind string, roleID string) (int64, *ErrorResponse) {
 	policyNamePredicate := ""
 	args := []interface{}{FormatPathForDb(resourcePath), ownerSubjectType, username, kind}
 	if roleID != "" {
@@ -243,7 +248,7 @@ func deleteGeneratedUserBinding(tx *sqlx.Tx, resourcePath string, username strin
 		%s
 	`, policyNamePredicate)
 	if _, err := tx.Exec(stmt, args...); err != nil {
-		return newErrorResponse(fmt.Sprintf("failed to remove generated user binding: %s", err.Error()), 500, &err)
+		return 0, newErrorResponse(fmt.Sprintf("failed to remove generated user binding: %s", err.Error()), 500, &err)
 	}
 	stmt = fmt.Sprintf(`
 		DELETE FROM ownership_binding_metadata
@@ -256,10 +261,15 @@ func deleteGeneratedUserBinding(tx *sqlx.Tx, resourcePath string, username strin
 		AND ownership_binding_metadata.kind = $4
 		%s
 	`, policyNamePredicate)
-	if _, err := tx.Exec(stmt, args...); err != nil {
-		return newErrorResponse(fmt.Sprintf("failed to remove ownership binding metadata: %s", err.Error()), 500, &err)
+	result, err := tx.Exec(stmt, args...)
+	if err != nil {
+		return 0, newErrorResponse(fmt.Sprintf("failed to remove ownership binding metadata: %s", err.Error()), 500, &err)
 	}
-	return nil
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, newErrorResponse(fmt.Sprintf("failed to inspect ownership binding removal: %s", err.Error()), 500, &err)
+	}
+	return rowsAffected, nil
 }
 
 func generatedPolicyName(kind string, resourcePath string, roleID string) string {
