@@ -61,8 +61,61 @@ func (server *Server) readOwnershipResource(resourcePath string, includeChildren
 		JOIN policy_role ON policy_role.policy_id = policy.id
 		JOIN role ON role.id = policy_role.role_id
 		WHERE %s
-		ORDER BY resource.path, ownership_binding_metadata.kind, ownership_binding_metadata.subject_type, ownership_binding_metadata.subject_name, role.name
-	`, predicate)
+		UNION ALL
+		SELECT
+			ltree2text(resource.path) AS resource_path,
+			'user' AS subject_type,
+			usr.name AS subject_name,
+			'direct' AS kind,
+			role.name AS role_id,
+			policy.name AS policy_id,
+			FALSE AS protected,
+			'' AS template_name,
+			'' AS created_by,
+			jsonb_build_object('source', 'arborist-policy', 'authz_provider', usr_policy.authz_provider)::jsonb AS provenance
+		FROM usr_policy
+		JOIN usr ON usr_policy.usr_id = usr.id
+		JOIN policy ON usr_policy.policy_id = policy.id
+		JOIN policy_resource ON policy_resource.policy_id = policy.id
+		JOIN resource ON policy_resource.resource_id = resource.id
+		JOIN policy_role ON policy_role.policy_id = policy.id
+		JOIN role ON role.id = policy_role.role_id
+		LEFT JOIN ownership_binding_metadata
+			ON ownership_binding_metadata.policy_id = policy.id
+			AND ownership_binding_metadata.resource_id = resource.id
+			AND ownership_binding_metadata.subject_type = 'user'
+			AND LOWER(ownership_binding_metadata.subject_name) = LOWER(usr.name)
+		WHERE %s
+		AND ownership_binding_metadata.policy_id IS NULL
+		AND (usr_policy.expires_at IS NULL OR NOW() < usr_policy.expires_at)
+		UNION ALL
+		SELECT
+			ltree2text(resource.path) AS resource_path,
+			'group' AS subject_type,
+			grp.name AS subject_name,
+			'direct' AS kind,
+			role.name AS role_id,
+			policy.name AS policy_id,
+			FALSE AS protected,
+			'' AS template_name,
+			'' AS created_by,
+			jsonb_build_object('source', 'arborist-policy', 'authz_provider', grp_policy.authz_provider)::jsonb AS provenance
+		FROM grp_policy
+		JOIN grp ON grp_policy.grp_id = grp.id
+		JOIN policy ON grp_policy.policy_id = policy.id
+		JOIN policy_resource ON policy_resource.policy_id = policy.id
+		JOIN resource ON policy_resource.resource_id = resource.id
+		JOIN policy_role ON policy_role.policy_id = policy.id
+		JOIN role ON role.id = policy_role.role_id
+		LEFT JOIN ownership_binding_metadata
+			ON ownership_binding_metadata.policy_id = policy.id
+			AND ownership_binding_metadata.resource_id = resource.id
+			AND ownership_binding_metadata.subject_type = 'group'
+			AND LOWER(ownership_binding_metadata.subject_name) = LOWER(grp.name)
+		WHERE %s
+		AND ownership_binding_metadata.policy_id IS NULL
+		ORDER BY resource_path, kind, subject_type, subject_name, role_id
+	`, predicate, predicate, predicate)
 
 	rows := []ownershipResourceBindingRow{}
 	if err := server.db.Select(&rows, stmt, FormatPathForDb(resourcePath)); err != nil {
