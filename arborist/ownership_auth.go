@@ -11,7 +11,11 @@ func (server *Server) usernameFromBearer(r *http.Request) (string, *ErrorRespons
 	if authHeader == "" {
 		return "", newErrorResponse("Authorization header is required", http.StatusUnauthorized, nil)
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer"))
+	token := strings.TrimPrefix(authHeader, "bearer ")
+	if token == authHeader {
+		return "", newErrorResponse("Authorization header must use bearer token scheme", http.StatusUnauthorized, nil)
+	}
+	token = strings.TrimSpace(token)
 	info, err := server.decodeToken(token, nil)
 	if err != nil {
 		return "", newErrorResponse(fmt.Sprintf("invalid authorization token: %s", err.Error()), http.StatusUnauthorized, &err)
