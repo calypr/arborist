@@ -44,6 +44,24 @@ func (server *Server) readOwnershipResource(resourcePath string, includeChildren
 	}
 
 	stmt := fmt.Sprintf(`
+		WITH target_resource AS (
+			SELECT id, path
+			FROM resource
+			WHERE %s
+		),
+		effective_policy AS (
+			SELECT DISTINCT ON (target_resource.id, policy_resource.policy_id)
+				target_resource.id AS resource_id,
+				target_resource.path AS resource_path,
+				policy_resource.policy_id,
+				policy_root.path AS policy_resource_path
+			FROM target_resource
+			JOIN resource AS policy_root ON target_resource.path <@ policy_root.path
+			JOIN policy_resource ON policy_resource.resource_id = policy_root.id
+			LEFT JOIN generated_policy_metadata ON generated_policy_metadata.policy_id = policy_resource.policy_id
+			WHERE generated_policy_metadata.policy_id IS NULL
+			ORDER BY target_resource.id, policy_resource.policy_id, nlevel(policy_root.path) DESC
+		)
 		SELECT
 			ltree2text(resource.path) AS resource_path,
 			ownership_binding_metadata.subject_type,
@@ -60,10 +78,10 @@ func (server *Server) readOwnershipResource(resourcePath string, includeChildren
 		JOIN policy ON ownership_binding_metadata.policy_id = policy.id
 		JOIN policy_role ON policy_role.policy_id = policy.id
 		JOIN role ON role.id = policy_role.role_id
-		WHERE %s
+		JOIN target_resource ON target_resource.id = resource.id
 		UNION ALL
 		SELECT
-			ltree2text(resource.path) AS resource_path,
+			ltree2text(effective_policy.resource_path) AS resource_path,
 			'user' AS subject_type,
 			usr.name AS subject_name,
 			'direct' AS kind,
@@ -72,25 +90,58 @@ func (server *Server) readOwnershipResource(resourcePath string, includeChildren
 			FALSE AS protected,
 			'' AS template_name,
 			'' AS created_by,
-			jsonb_build_object('source', 'arborist-policy', 'authz_provider', usr_policy.authz_provider)::jsonb AS provenance
-		FROM usr_policy
+			jsonb_build_object(
+				'source', 'arborist-policy',
+				'authz_provider', usr_policy.authz_provider,
+				'policy_resource_path', ltree2text(effective_policy.policy_resource_path)
+			)::jsonb AS provenance
+		FROM effective_policy
+		JOIN usr_policy ON usr_policy.policy_id = effective_policy.policy_id
 		JOIN usr ON usr_policy.usr_id = usr.id
-		JOIN policy ON usr_policy.policy_id = policy.id
-		JOIN policy_resource ON policy_resource.policy_id = policy.id
-		JOIN resource ON policy_resource.resource_id = resource.id
+		JOIN policy ON policy.id = effective_policy.policy_id
 		JOIN policy_role ON policy_role.policy_id = policy.id
 		JOIN role ON role.id = policy_role.role_id
 		LEFT JOIN ownership_binding_metadata
 			ON ownership_binding_metadata.policy_id = policy.id
-			AND ownership_binding_metadata.resource_id = resource.id
 			AND ownership_binding_metadata.subject_type = 'user'
 			AND LOWER(ownership_binding_metadata.subject_name) = LOWER(usr.name)
-		WHERE %s
-		AND ownership_binding_metadata.policy_id IS NULL
+		WHERE ownership_binding_metadata.policy_id IS NULL
 		AND (usr_policy.expires_at IS NULL OR NOW() < usr_policy.expires_at)
 		UNION ALL
 		SELECT
-			ltree2text(resource.path) AS resource_path,
+			ltree2text(effective_policy.resource_path) AS resource_path,
+			'user' AS subject_type,
+			usr.name AS subject_name,
+			'direct' AS kind,
+			role.name AS role_id,
+			policy.name AS policy_id,
+			FALSE AS protected,
+			'' AS template_name,
+			'' AS created_by,
+			jsonb_build_object(
+				'source', 'arborist-group-policy',
+				'group', grp.name,
+				'membership_authz_provider', usr_grp.authz_provider,
+				'policy_authz_provider', grp_policy.authz_provider,
+				'policy_resource_path', ltree2text(effective_policy.policy_resource_path)
+			)::jsonb AS provenance
+		FROM effective_policy
+		JOIN grp_policy ON grp_policy.policy_id = effective_policy.policy_id
+		JOIN usr_grp ON usr_grp.grp_id = grp_policy.grp_id
+		JOIN usr ON usr_grp.usr_id = usr.id
+		JOIN grp ON usr_grp.grp_id = grp.id
+		JOIN policy ON policy.id = effective_policy.policy_id
+		JOIN policy_role ON policy_role.policy_id = policy.id
+		JOIN role ON role.id = policy_role.role_id
+		LEFT JOIN ownership_binding_metadata
+			ON ownership_binding_metadata.policy_id = policy.id
+			AND ownership_binding_metadata.subject_type = 'group'
+			AND LOWER(ownership_binding_metadata.subject_name) = LOWER(grp.name)
+		WHERE ownership_binding_metadata.policy_id IS NULL
+		AND (usr_grp.expires_at IS NULL OR NOW() < usr_grp.expires_at)
+		UNION ALL
+		SELECT
+			ltree2text(effective_policy.resource_path) AS resource_path,
 			'group' AS subject_type,
 			grp.name AS subject_name,
 			'direct' AS kind,
@@ -99,23 +150,24 @@ func (server *Server) readOwnershipResource(resourcePath string, includeChildren
 			FALSE AS protected,
 			'' AS template_name,
 			'' AS created_by,
-			jsonb_build_object('source', 'arborist-policy', 'authz_provider', grp_policy.authz_provider)::jsonb AS provenance
-		FROM grp_policy
+			jsonb_build_object(
+				'source', 'arborist-policy',
+				'authz_provider', grp_policy.authz_provider,
+				'policy_resource_path', ltree2text(effective_policy.policy_resource_path)
+			)::jsonb AS provenance
+		FROM effective_policy
+		JOIN grp_policy ON grp_policy.policy_id = effective_policy.policy_id
 		JOIN grp ON grp_policy.grp_id = grp.id
-		JOIN policy ON grp_policy.policy_id = policy.id
-		JOIN policy_resource ON policy_resource.policy_id = policy.id
-		JOIN resource ON policy_resource.resource_id = resource.id
+		JOIN policy ON policy.id = effective_policy.policy_id
 		JOIN policy_role ON policy_role.policy_id = policy.id
 		JOIN role ON role.id = policy_role.role_id
 		LEFT JOIN ownership_binding_metadata
 			ON ownership_binding_metadata.policy_id = policy.id
-			AND ownership_binding_metadata.resource_id = resource.id
 			AND ownership_binding_metadata.subject_type = 'group'
 			AND LOWER(ownership_binding_metadata.subject_name) = LOWER(grp.name)
-		WHERE %s
-		AND ownership_binding_metadata.policy_id IS NULL
+		WHERE ownership_binding_metadata.policy_id IS NULL
 		ORDER BY resource_path, kind, subject_type, subject_name, role_id
-	`, predicate, predicate, predicate)
+	`, predicate)
 
 	rows := []ownershipResourceBindingRow{}
 	if err := server.db.Select(&rows, stmt, FormatPathForDb(resourcePath)); err != nil {
