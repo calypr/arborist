@@ -16,6 +16,7 @@ func (server *Server) handleOwnershipResourceRead(w http.ResponseWriter, r *http
 		return
 	}
 	includeChildren := strings.EqualFold(r.URL.Query().Get("include_children"), "true")
+	includeAdmins := !strings.EqualFold(r.URL.Query().Get("include_admins"), "false")
 
 	caller, errResponse := server.usernameFromBearer(r)
 	if errResponse != nil {
@@ -27,7 +28,10 @@ func (server *Server) handleOwnershipResourceRead(w http.ResponseWriter, r *http
 		return
 	}
 
-	response, errResponse := server.readOwnershipResource(resourcePath, includeChildren)
+	response, errResponse := server.readOwnershipResource(resourcePath, ownershipResourceReadOptions{
+		IncludeChildren: includeChildren,
+		IncludeAdmins:   includeAdmins,
+	})
 	if errResponse != nil {
 		errResponse.log.write(server.logger)
 		_ = errResponse.write(w, r)

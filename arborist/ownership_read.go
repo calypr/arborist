@@ -8,6 +8,7 @@ import (
 type ownershipResourceReadResponse struct {
 	ResourcePath    string                     `json:"resource_path"`
 	IncludeChildren bool                       `json:"include_children"`
+	IncludeAdmins   bool                       `json:"include_admins"`
 	Bindings        []ownershipResourceBinding `json:"bindings"`
 }
 
@@ -37,9 +38,14 @@ type ownershipResourceBindingRow struct {
 	Provenance   []byte `db:"provenance"`
 }
 
-func (server *Server) readOwnershipResource(resourcePath string, includeChildren bool) (*ownershipResourceReadResponse, *ErrorResponse) {
+type ownershipResourceReadOptions struct {
+	IncludeChildren bool
+	IncludeAdmins   bool
+}
+
+func (server *Server) readOwnershipResource(resourcePath string, options ownershipResourceReadOptions) (*ownershipResourceReadResponse, *ErrorResponse) {
 	predicate := "resource.path = text2ltree($1)"
-	if includeChildren {
+	if options.IncludeChildren {
 		predicate = "resource.path <@ text2ltree($1)"
 	}
 
@@ -182,6 +188,9 @@ func (server *Server) readOwnershipResource(resourcePath string, includeChildren
 				return nil, newErrorResponse(fmt.Sprintf("ownership provenance parse failed: %s", err.Error()), 500, &err)
 			}
 		}
+		if !includeOwnershipBinding(row, provenance, options) {
+			continue
+		}
 		bindings = append(bindings, ownershipResourceBinding{
 			ResourcePath: formatDbPath(row.ResourcePath),
 			SubjectType:  row.SubjectType,
@@ -198,7 +207,26 @@ func (server *Server) readOwnershipResource(resourcePath string, includeChildren
 
 	return &ownershipResourceReadResponse{
 		ResourcePath:    resourcePath,
-		IncludeChildren: includeChildren,
+		IncludeChildren: options.IncludeChildren,
+		IncludeAdmins:   options.IncludeAdmins,
 		Bindings:        bindings,
 	}, nil
+}
+
+func includeOwnershipBinding(row ownershipResourceBindingRow, provenance map[string]interface{}, options ownershipResourceReadOptions) bool {
+	if !options.IncludeAdmins && isAdminOwnershipBinding(row, provenance) {
+		return false
+	}
+	return true
+}
+
+func isAdminOwnershipBinding(row ownershipResourceBindingRow, provenance map[string]interface{}) bool {
+	if row.Kind == "admin" || row.Protected {
+		return true
+	}
+	if row.SubjectName == "administrators" {
+		return true
+	}
+	group, _ := provenance["group"].(string)
+	return group == "administrators"
 }
