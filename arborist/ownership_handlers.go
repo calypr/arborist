@@ -40,6 +40,34 @@ func (server *Server) handleOwnershipResourceRead(w http.ResponseWriter, r *http
 	_ = jsonResponseFrom(response, http.StatusOK).write(w, r)
 }
 
+func (server *Server) handleOwnershipResourceDelete(w http.ResponseWriter, r *http.Request) {
+	resourcePath := cleanResourcePath(r.URL.Query().Get("resource_path"))
+	if resourcePath == "" {
+		_ = newErrorResponse("resource_path is required", http.StatusBadRequest, nil).write(w, r)
+		return
+	}
+
+	caller, errResponse := server.usernameFromBearer(r)
+	if errResponse != nil {
+		_ = errResponse.write(w, r)
+		return
+	}
+	if errResponse := server.requireOwnershipControl(caller, resourcePath); errResponse != nil {
+		_ = errResponse.write(w, r)
+		return
+	}
+
+	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+		return deleteOwnershipResource(tx, resourcePath)
+	}); errResponse != nil {
+		errResponse.log.write(server.logger)
+		_ = errResponse.write(w, r)
+		return
+	}
+
+	_ = jsonResponseFrom(nil, http.StatusNoContent).write(w, r)
+}
+
 func (server *Server) handleOwnershipCreateDescendant(w http.ResponseWriter, r *http.Request, body []byte) {
 	var request descendantCreateRequest
 	if err := json.Unmarshal(body, &request); err != nil {

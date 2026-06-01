@@ -9,6 +9,7 @@ import (
 
 const (
 	createDescendantMethod = "create-descendant"
+	orgMemberRole          = "org-member"
 	ownershipProvider      = "arborist-ownership"
 	ownerSubjectType       = "user"
 )

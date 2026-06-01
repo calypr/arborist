@@ -221,7 +221,7 @@ func includeOwnershipBinding(row ownershipResourceBindingRow, provenance map[str
 }
 
 func isAdminOwnershipBinding(row ownershipResourceBindingRow, provenance map[string]interface{}) bool {
-	if row.Kind == "admin" || row.Protected {
+	if row.Kind == "admin" {
 		return true
 	}
 	if row.SubjectName == "administrators" {

@@ -1,6 +1,7 @@
 package arborist
 
 import (
+	"database/sql"
 	"fmt"
 	"regexp"
 
@@ -43,7 +44,24 @@ func templateForResource(tx *sqlx.Tx, resourcePath string) (*ownershipTemplate, 
 		LIMIT 1
 	`
 	var template ownershipTemplate
+	if err := tx.Get(&template, stmt, resource.ID); err == nil {
+		return &template, resource.ID, nil
+	} else if err != sql.ErrNoRows {
+		return nil, 0, newErrorResponse(fmt.Sprintf("ownership template lookup failed for %s: %s", resourcePath, err.Error()), 500, &err)
+	}
+
+	stmt = `
+		SELECT ownership_template.*
+		FROM policy_resource
+		JOIN generated_policy_metadata ON generated_policy_metadata.policy_id = policy_resource.policy_id
+		JOIN ownership_template ON ownership_template.name = generated_policy_metadata.template_name
+		WHERE policy_resource.resource_id = $1
+		LIMIT 1
+	`
 	if err := tx.Get(&template, stmt, resource.ID); err != nil {
+		if err != sql.ErrNoRows {
+			return nil, 0, newErrorResponse(fmt.Sprintf("ownership template lookup failed for %s: %s", resourcePath, err.Error()), 500, &err)
+		}
 		return nil, 0, newErrorResponse(fmt.Sprintf("ownership template not found for %s", resourcePath), 404, &err)
 	}
 	return &template, resource.ID, nil

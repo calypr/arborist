@@ -107,6 +107,12 @@ Initial templates:
 - `gen3-project`: parent `^/programs/[^/]+/projects$`, creates a project under
   an existing program's project container.
 
+The follow-up `2026-06-01T000000Z_org_member_role` migration adds the
+`org-member` role. `org-member` is intentionally narrow: it grants only
+`arborist/create-descendant`. For Gen3 organizations it is delegated on
+`/programs/<org>/projects`, so members can create projects in that org without
+getting access to existing sibling projects.
+
 ### `generated_policy_metadata`
 
 Marks policies created by this workflow.
@@ -285,6 +291,10 @@ that shape as concrete policies:
 - the owner role includes `arborist/create-descendant`
 - the next project creation is authorized on the immediate project container
 
+Org membership uses the same immediate-container model without owner semantics:
+granting `org-member` on `/programs/<org>/projects` allows project creation
+only. The created project still gives the creator normal project ownership.
+
 Doing that correctly with raw APIs requires the caller to understand Arborist's
 resource inheritance, policy-resource attachment behavior, role expansion, and
 admin recovery expectations. The ownership macro makes that repeated pattern
@@ -319,6 +329,8 @@ Required baseline authz:
 - Owners of `/programs/<org>` receive `create-descendant` on that org's
   generated `projects` container through the owner policy attached during
   program creation.
+- Members of an existing organization receive `org-member` on
+  `/programs/<org>/projects`; this grants project creation only.
 - Administrators remain protected recovery owners through the
   `administrators` group binding seeded by the template.
 

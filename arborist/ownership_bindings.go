@@ -36,6 +36,18 @@ func ensureOwnershipBaseRoles(tx *sqlx.Tx, ownerRole string) *ErrorResponse {
 			return newErrorResponse(fmt.Sprintf("failed to ensure owner permission: %s", err.Error()), 500, &err)
 		}
 	}
+	memberRoleID, errResponse := ensureRole(tx, orgMemberRole, "Generated organization member role")
+	if errResponse != nil {
+		return errResponse
+	}
+	stmt := `
+		INSERT INTO permission(role_id, name, service, method)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (role_id, name) DO NOTHING
+	`
+	if _, err := tx.Exec(stmt, memberRoleID, "org_member_create_descendant", "arborist", createDescendantMethod); err != nil {
+		return newErrorResponse(fmt.Sprintf("failed to ensure org member permission: %s", err.Error()), 500, &err)
+	}
 	return nil
 }
 
@@ -54,11 +66,29 @@ func ensureRole(tx *sqlx.Tx, roleName string, description string) (int64, *Error
 }
 
 func ensureOwnerBinding(tx *sqlx.Tx, template *ownershipTemplate, resourceID int64, resourcePath string, username string, createdBy string) *ErrorResponse {
-	return ensureGeneratedUserBinding(tx, template, resourceID, resourcePath, username, template.OwnerRole, "owner", true, createdBy)
+	if errResponse := ensureGeneratedUserBinding(tx, template, resourceID, resourcePath, username, template.OwnerRole, "owner", true, createdBy); errResponse != nil {
+		return errResponse
+	}
+	return attachGeneratedPolicyToChildContainer(tx, template, resourcePath, "owner", template.OwnerRole)
 }
 
 func ensureDelegatedUserBinding(tx *sqlx.Tx, template *ownershipTemplate, resourceID int64, resourcePath string, username string, roleID string, createdBy string) *ErrorResponse {
 	return ensureGeneratedUserBinding(tx, template, resourceID, resourcePath, username, roleID, "delegated", false, createdBy)
+}
+
+func attachGeneratedPolicyToChildContainer(tx *sqlx.Tx, template *ownershipTemplate, resourcePath string, kind string, roleID string) *ErrorResponse {
+	if !template.ChildContainerName.Valid {
+		return nil
+	}
+	containerPath := cleanResourcePath(resourcePath + "/" + template.ChildContainerName.String)
+	container, err := resourceWithPathTx(tx, containerPath)
+	if err != nil {
+		return newErrorResponse(fmt.Sprintf("container lookup failed: %s", err.Error()), 500, &err)
+	}
+	if container == nil {
+		return nil
+	}
+	return attachPolicyToResource(tx, generatedPolicyName(kind, resourcePath, roleID), container.ID)
 }
 
 func ensureGeneratedUserBinding(tx *sqlx.Tx, template *ownershipTemplate, resourceID int64, resourcePath string, username string, roleID string, kind string, protected bool, createdBy string) *ErrorResponse {
