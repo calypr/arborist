@@ -59,8 +59,8 @@ The ownership APIs remain the correct API for ownership concepts:
 
 The access macro does not replace owner management. It handles direct
 non-owner user access on an existing resource. Owner add/remove must stay on
-ownership endpoints because ownership has additional invariants, including
-protected recovery paths and no-orphan rules.
+ownership endpoints because ownership is a separate control-plane concept from
+ordinary reader/writer project access.
 
 ## API Contract
 

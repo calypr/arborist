@@ -56,15 +56,15 @@ func grantUserAccess(tx *sqlx.Tx, request accessUserRequest, createdBy string) (
 	if request.ResourcePath == "" || request.Username == "" || request.RoleID == "" {
 		return nil, newErrorResponse("resource_path, username, and role_id are required", 400, nil)
 	}
-	template, resourceID, errResponse := templateForAccessResource(tx, request.ResourcePath)
+	target, errResponse := resolveAccessTarget(tx, request.ResourcePath)
 	if errResponse != nil {
 		return nil, errResponse
 	}
-	if !template.roleIsDelegable(request.RoleID) {
-		msg := fmt.Sprintf("role %s is not delegable for template %s", request.RoleID, template.Name)
+	if !target.Template.roleIsDelegable(request.RoleID) {
+		msg := fmt.Sprintf("role %s is not delegable for template %s", request.RoleID, target.Template.Name)
 		return nil, newErrorResponse(msg, 400, nil)
 	}
-	if errResponse := ensureDelegatedUserBinding(tx, template, resourceID, request.ResourcePath, request.Username, request.RoleID, createdBy); errResponse != nil {
+	if errResponse := ensureDelegatedUserBindingForTarget(tx, target, request.Username, request.RoleID, createdBy); errResponse != nil {
 		return nil, errResponse
 	}
 	return &accessUserResponse{
@@ -79,27 +79,27 @@ func grantUserAccess(tx *sqlx.Tx, request accessUserRequest, createdBy string) (
 	}, nil
 }
 
-func templateForAccessResource(tx *sqlx.Tx, resourcePath string) (*ownershipTemplate, int64, *ErrorResponse) {
-	template, resourceID, errResponse := templateForResource(tx, resourcePath)
+func resolveAccessTarget(tx *sqlx.Tx, resourcePath string) (*ownershipTarget, *ErrorResponse) {
+	target, errResponse := resolveOwnershipTarget(tx, resourcePath)
 	if errResponse == nil {
-		return template, resourceID, nil
+		return target, nil
 	}
 	resource, err := resourceWithPathTx(tx, resourcePath)
 	if err != nil {
-		return nil, 0, newErrorResponse(fmt.Sprintf("resource lookup failed: %s", err.Error()), 500, &err)
+		return nil, newErrorResponse(fmt.Sprintf("resource lookup failed: %s", err.Error()), 500, &err)
 	}
 	if resource == nil {
-		return nil, 0, newErrorResponse(fmt.Sprintf("resource does not exist: %s", resourcePath), 404, nil)
+		return nil, newErrorResponse(fmt.Sprintf("resource does not exist: %s", resourcePath), 404, nil)
 	}
 	parentPath, ok := parentResourcePath(resourcePath)
 	if !ok {
-		return nil, 0, errResponse
+		return nil, errResponse
 	}
-	template, errResponse = templateForParent(tx, parentPath, "")
+	template, errResponse := templateForParent(tx, parentPath, "")
 	if errResponse != nil {
-		return nil, 0, errResponse
+		return nil, errResponse
 	}
-	return template, resource.ID, nil
+	return newManagedOwnershipTarget(template, resource.ID, resourcePath), nil
 }
 
 func parentResourcePath(resourcePath string) (string, bool) {

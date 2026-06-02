@@ -191,8 +191,8 @@ control ownership for that resource.
 
 Route: `DELETE /ownership/owner`
 
-Removes an owner binding. Arborist rejects the operation if it would leave the
-resource without any owner and without protected admin recovery.
+Removes an owner binding. A resource is allowed to have zero explicit owners;
+site administrators can always recover access through normal admin policy.
 
 ### Delegate User Access
 
@@ -245,8 +245,6 @@ APIs:
 - Protected generated policies cannot be overwritten.
 - Resources with protected generated ownership cannot be deleted through the
   generic resource delete path.
-- Owners cannot remove the last owner if no protected admin recovery binding
-  remains.
 - Owners cannot revoke protected administrator-derived access.
 
 These rules are meant to keep self-service creation from producing resources
@@ -354,5 +352,4 @@ When extending this feature:
 - Keep generated policies concrete and visible.
 - Add structured provenance when new generated binding kinds are introduced.
 - Do not let owner APIs mutate protected admin recovery bindings.
-- Preserve the no-orphan invariant before deleting or removing ownership.
 - Keep `/auth/request` semantics unchanged for missing resources.

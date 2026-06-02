@@ -66,21 +66,36 @@ func ensureRole(tx *sqlx.Tx, roleName string, description string) (int64, *Error
 }
 
 func ensureOwnerBinding(tx *sqlx.Tx, template *ownershipTemplate, resourceID int64, resourcePath string, username string, createdBy string) *ErrorResponse {
-	if errResponse := ensureGeneratedUserBinding(tx, template, resourceID, resourcePath, username, template.OwnerRole, "owner", true, createdBy); errResponse != nil {
+	target := newManagedOwnershipTarget(template, resourceID, resourcePath)
+	if errResponse := ensureGeneratedUserBinding(tx, target, username, template.OwnerRole, "owner", false, createdBy); errResponse != nil {
 		return errResponse
 	}
-	return attachGeneratedPolicyToChildContainer(tx, template, resourcePath, "owner", template.OwnerRole)
+	return attachGeneratedPolicyToChildContainer(tx, target, "owner", template.OwnerRole)
 }
 
 func ensureDelegatedUserBinding(tx *sqlx.Tx, template *ownershipTemplate, resourceID int64, resourcePath string, username string, roleID string, createdBy string) *ErrorResponse {
-	return ensureGeneratedUserBinding(tx, template, resourceID, resourcePath, username, roleID, "delegated", false, createdBy)
+	return ensureGeneratedUserBinding(tx, newManagedOwnershipTarget(template, resourceID, resourcePath), username, roleID, "delegated", false, createdBy)
 }
 
-func attachGeneratedPolicyToChildContainer(tx *sqlx.Tx, template *ownershipTemplate, resourcePath string, kind string, roleID string) *ErrorResponse {
-	if !template.ChildContainerName.Valid {
+func ensureOwnerBindingForTarget(tx *sqlx.Tx, target *ownershipTarget, username string, createdBy string) *ErrorResponse {
+	if errResponse := ensureGeneratedUserBinding(tx, target, username, target.Template.OwnerRole, "owner", false, createdBy); errResponse != nil {
+		return errResponse
+	}
+	return attachGeneratedPolicyToChildContainer(tx, target, "owner", target.Template.OwnerRole)
+}
+
+func ensureDelegatedUserBindingForTarget(tx *sqlx.Tx, target *ownershipTarget, username string, roleID string, createdBy string) *ErrorResponse {
+	return ensureGeneratedUserBinding(tx, target, username, roleID, "delegated", false, createdBy)
+}
+
+func attachGeneratedPolicyToChildContainer(tx *sqlx.Tx, target *ownershipTarget, kind string, roleID string) *ErrorResponse {
+	if !target.Template.ChildContainerName.Valid {
 		return nil
 	}
-	containerPath := cleanResourcePath(resourcePath + "/" + template.ChildContainerName.String)
+	if target.Kind == ownershipTargetChildContainerKind {
+		return nil
+	}
+	containerPath := cleanResourcePath(target.ResourcePath + "/" + target.Template.ChildContainerName.String)
 	container, err := resourceWithPathTx(tx, containerPath)
 	if err != nil {
 		return newErrorResponse(fmt.Sprintf("container lookup failed: %s", err.Error()), 500, &err)
@@ -88,10 +103,10 @@ func attachGeneratedPolicyToChildContainer(tx *sqlx.Tx, template *ownershipTempl
 	if container == nil {
 		return nil
 	}
-	return attachPolicyToResource(tx, generatedPolicyName(kind, resourcePath, roleID), container.ID)
+	return attachPolicyToResource(tx, generatedPolicyName(kind, target.PolicyPath, roleID), container.ID)
 }
 
-func ensureGeneratedUserBinding(tx *sqlx.Tx, template *ownershipTemplate, resourceID int64, resourcePath string, username string, roleID string, kind string, protected bool, createdBy string) *ErrorResponse {
+func ensureGeneratedUserBinding(tx *sqlx.Tx, target *ownershipTarget, username string, roleID string, kind string, protected bool, createdBy string) *ErrorResponse {
 	username = strings.ToLower(strings.TrimSpace(username))
 	if username == "" {
 		return newErrorResponse("username is required", 400, nil)
@@ -99,7 +114,7 @@ func ensureGeneratedUserBinding(tx *sqlx.Tx, template *ownershipTemplate, resour
 	if errResponse := ensureUser(tx, username); errResponse != nil {
 		return errResponse
 	}
-	policyName, policyID, errResponse := ensureGeneratedPolicy(tx, template, resourceID, resourcePath, roleID, kind, protected, createdBy)
+	policyName, policyID, errResponse := ensureGeneratedPolicy(tx, target, roleID, kind, protected, createdBy)
 	if errResponse != nil {
 		return errResponse
 	}
@@ -111,10 +126,15 @@ func ensureGeneratedUserBinding(tx *sqlx.Tx, template *ownershipTemplate, resour
 	if _, err := tx.Exec(stmt, username, policyID, sql.NullString{String: ownershipProvider, Valid: true}); err != nil {
 		return newErrorResponse(fmt.Sprintf("failed to bind generated policy %s to user %s: %s", policyName, username, err.Error()), 500, &err)
 	}
-	return upsertBindingMetadata(tx, ownerSubjectType, username, policyID, resourceID, template.Name, kind, protected, createdBy)
+	return upsertBindingMetadata(tx, ownerSubjectType, username, policyID, target.ResourceID, target.Template.Name, kind, protected, createdBy)
 }
 
 func ensureProtectedAdminBinding(tx *sqlx.Tx, template *ownershipTemplate, resourceID int64, resourcePath string, groupName string, createdBy string) (string, *ErrorResponse) {
+	target := newManagedOwnershipTarget(template, resourceID, resourcePath)
+	return ensureProtectedAdminBindingForTarget(tx, target, groupName, createdBy)
+}
+
+func ensureProtectedAdminBindingForTarget(tx *sqlx.Tx, target *ownershipTarget, groupName string, createdBy string) (string, *ErrorResponse) {
 	groupName = strings.TrimSpace(groupName)
 	if groupName == "" {
 		return "", nil
@@ -126,7 +146,7 @@ func ensureProtectedAdminBinding(tx *sqlx.Tx, template *ownershipTemplate, resou
 	if count == 0 {
 		return "", newErrorResponse(fmt.Sprintf("configured admin group does not exist: %s", groupName), 500, nil)
 	}
-	policyName, policyID, errResponse := ensureGeneratedPolicy(tx, template, resourceID, resourcePath, template.AdminRole, "admin", true, createdBy)
+	policyName, policyID, errResponse := ensureGeneratedPolicy(tx, target, target.Template.AdminRole, "admin", true, createdBy)
 	if errResponse != nil {
 		return "", errResponse
 	}
@@ -138,12 +158,16 @@ func ensureProtectedAdminBinding(tx *sqlx.Tx, template *ownershipTemplate, resou
 	if _, err := tx.Exec(stmt, groupName, policyID, sql.NullString{String: ownershipProvider, Valid: true}); err != nil {
 		return "", newErrorResponse(fmt.Sprintf("failed to bind admin policy %s to group %s: %s", policyName, groupName, err.Error()), 500, &err)
 	}
-	errResponse = upsertBindingMetadata(tx, "group", groupName, policyID, resourceID, template.Name, "admin", true, createdBy)
+	errResponse = upsertBindingMetadata(tx, "group", groupName, policyID, target.ResourceID, target.Template.Name, "admin", true, createdBy)
 	return policyName, errResponse
 }
 
-func ensureGeneratedPolicy(tx *sqlx.Tx, template *ownershipTemplate, resourceID int64, resourcePath string, roleID string, kind string, protected bool, createdBy string) (string, int64, *ErrorResponse) {
-	policyName := generatedPolicyName(kind, resourcePath, roleID)
+func ensureGeneratedPolicy(tx *sqlx.Tx, target *ownershipTarget, roleID string, kind string, protected bool, createdBy string) (string, int64, *ErrorResponse) {
+	policyName := generatedPolicyName(kind, target.PolicyPath, roleID)
+	roleDBID, errResponse := roleIDByName(tx, roleID)
+	if errResponse != nil {
+		return "", 0, errResponse
+	}
 	var policyID int64
 	stmt := `
 		INSERT INTO policy(name, description)
@@ -151,34 +175,46 @@ func ensureGeneratedPolicy(tx *sqlx.Tx, template *ownershipTemplate, resourceID 
 		ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
 		RETURNING id
 	`
-	description := fmt.Sprintf("Generated %s policy for %s", kind, resourcePath)
+	description := fmt.Sprintf("Generated %s policy for %s", kind, target.PolicyPath)
 	if err := tx.Get(&policyID, stmt, policyName, description); err != nil {
 		return "", 0, newErrorResponse(fmt.Sprintf("failed to ensure generated policy: %s", err.Error()), 500, &err)
 	}
 	if _, err := tx.Exec(
 		"INSERT INTO policy_resource(policy_id, resource_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
 		policyID,
-		resourceID,
+		target.ResourceID,
 	); err != nil {
 		return "", 0, newErrorResponse(fmt.Sprintf("failed to attach generated policy resource: %s", err.Error()), 500, &err)
 	}
 	if _, err := tx.Exec(
-		"INSERT INTO policy_role(policy_id, role_id) VALUES ($1, (SELECT id FROM role WHERE name = $2)) ON CONFLICT DO NOTHING",
+		"INSERT INTO policy_role(policy_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
 		policyID,
-		roleID,
+		roleDBID,
 	); err != nil {
 		return "", 0, newErrorResponse(fmt.Sprintf("failed to attach generated policy role: %s", err.Error()), 500, &err)
 	}
-	provenance := fmt.Sprintf(`{"source":"arborist-ownership","resource_path":%q,"role_id":%q}`, resourcePath, roleID)
+	provenance := fmt.Sprintf(`{"source":"arborist-ownership","resource_path":%q,"anchor_path":%q,"target_kind":%q,"role_id":%q}`, target.PolicyPath, target.AnchorPath, target.Kind, roleID)
 	stmt = `
 		INSERT INTO generated_policy_metadata(policy_id, resource_id, template_name, kind, protected, created_by, provenance)
 		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
 		ON CONFLICT (policy_id) DO UPDATE SET protected = EXCLUDED.protected
 	`
-	if _, err := tx.Exec(stmt, policyID, resourceID, template.Name, kind, protected, createdBy, provenance); err != nil {
+	if _, err := tx.Exec(stmt, policyID, target.ResourceID, target.Template.Name, kind, protected, createdBy, provenance); err != nil {
 		return "", 0, newErrorResponse(fmt.Sprintf("failed to write generated policy metadata: %s", err.Error()), 500, &err)
 	}
 	return policyName, policyID, nil
+}
+
+func roleIDByName(tx *sqlx.Tx, roleName string) (int64, *ErrorResponse) {
+	var roleID int64
+	err := tx.Get(&roleID, "SELECT id FROM role WHERE name = $1", roleName)
+	if err == nil {
+		return roleID, nil
+	}
+	if err == sql.ErrNoRows {
+		return 0, newErrorResponse(fmt.Sprintf("configured ownership role does not exist: %s", roleName), 500, &err)
+	}
+	return 0, newErrorResponse(fmt.Sprintf("role lookup failed for %s: %s", roleName, err.Error()), 500, &err)
 }
 
 func attachPolicyToResource(tx *sqlx.Tx, policyName string, resourceID int64) *ErrorResponse {
@@ -217,33 +253,6 @@ func ensureUser(tx *sqlx.Tx, username string) *ErrorResponse {
 func removeOwnerBinding(tx *sqlx.Tx, resourcePath string, username string) *ErrorResponse {
 	resourcePath = cleanResourcePath(resourcePath)
 	username = strings.ToLower(strings.TrimSpace(username))
-	var remainingOwners int
-	stmt := `
-		SELECT COUNT(*)
-		FROM ownership_binding_metadata
-		JOIN resource ON ownership_binding_metadata.resource_id = resource.id
-		WHERE resource.path = text2ltree($1)
-		AND kind = 'owner'
-		AND NOT (subject_type = $2 AND LOWER(subject_name) = $3)
-	`
-	if err := tx.Get(&remainingOwners, stmt, FormatPathForDb(resourcePath), ownerSubjectType, username); err != nil {
-		return newErrorResponse(fmt.Sprintf("owner count failed: %s", err.Error()), 500, &err)
-	}
-	var protectedAdmins int
-	stmt = `
-		SELECT COUNT(*)
-		FROM ownership_binding_metadata
-		JOIN resource ON ownership_binding_metadata.resource_id = resource.id
-		WHERE resource.path = text2ltree($1)
-		AND kind = 'admin'
-		AND protected = TRUE
-	`
-	if err := tx.Get(&protectedAdmins, stmt, FormatPathForDb(resourcePath)); err != nil {
-		return newErrorResponse(fmt.Sprintf("admin recovery count failed: %s", err.Error()), 500, &err)
-	}
-	if remainingOwners == 0 && protectedAdmins == 0 {
-		return newErrorResponse("cannot remove the last owner without a protected admin recovery binding", 400, nil)
-	}
 	return deleteGeneratedUserBinding(tx, resourcePath, username, "owner", "")
 }
 

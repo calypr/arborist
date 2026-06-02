@@ -109,3 +109,11 @@ func (errorResponse *ErrorResponse) write(w http.ResponseWriter, r *http.Request
 	}
 	return nil
 }
+
+func (server *Server) writeError(w http.ResponseWriter, r *http.Request, errorResponse *ErrorResponse) {
+	if errorResponse == nil {
+		return
+	}
+	errorResponse.log.write(server.logger)
+	_ = errorResponse.write(w, r)
+}

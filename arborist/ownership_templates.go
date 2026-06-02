@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -28,13 +29,13 @@ func templateForParent(tx *sqlx.Tx, parentPath string, templateName string) (*ow
 	return nil, newErrorResponse(fmt.Sprintf("no ownership template allows children under %s", parentPath), 400, nil)
 }
 
-func templateForResource(tx *sqlx.Tx, resourcePath string) (*ownershipTemplate, int64, *ErrorResponse) {
+func resolveOwnershipTarget(tx *sqlx.Tx, resourcePath string) (*ownershipTarget, *ErrorResponse) {
 	resource, err := resourceWithPathTx(tx, resourcePath)
 	if err != nil {
-		return nil, 0, newErrorResponse(fmt.Sprintf("resource lookup failed: %s", err.Error()), 500, &err)
+		return nil, newErrorResponse(fmt.Sprintf("resource lookup failed: %s", err.Error()), 500, &err)
 	}
 	if resource == nil {
-		return nil, 0, newErrorResponse(fmt.Sprintf("resource does not exist: %s", resourcePath), 404, nil)
+		return nil, newErrorResponse(fmt.Sprintf("resource does not exist: %s", resourcePath), 404, nil)
 	}
 	stmt := `
 		SELECT ownership_template.*
@@ -45,9 +46,9 @@ func templateForResource(tx *sqlx.Tx, resourcePath string) (*ownershipTemplate, 
 	`
 	var template ownershipTemplate
 	if err := tx.Get(&template, stmt, resource.ID); err == nil {
-		return &template, resource.ID, nil
+		return newManagedOwnershipTarget(&template, resource.ID, resourcePath), nil
 	} else if err != sql.ErrNoRows {
-		return nil, 0, newErrorResponse(fmt.Sprintf("ownership template lookup failed for %s: %s", resourcePath, err.Error()), 500, &err)
+		return nil, newErrorResponse(fmt.Sprintf("ownership template lookup failed for %s: %s", resourcePath, err.Error()), 500, &err)
 	}
 
 	stmt = `
@@ -60,11 +61,77 @@ func templateForResource(tx *sqlx.Tx, resourcePath string) (*ownershipTemplate, 
 	`
 	if err := tx.Get(&template, stmt, resource.ID); err != nil {
 		if err != sql.ErrNoRows {
-			return nil, 0, newErrorResponse(fmt.Sprintf("ownership template lookup failed for %s: %s", resourcePath, err.Error()), 500, &err)
+			return nil, newErrorResponse(fmt.Sprintf("ownership template lookup failed for %s: %s", resourcePath, err.Error()), 500, &err)
 		}
-		return nil, 0, newErrorResponse(fmt.Sprintf("ownership template not found for %s", resourcePath), 404, &err)
+		containerTemplate, anchorPath, errResponse := templateForChildContainer(tx, resourcePath)
+		if errResponse != nil {
+			return nil, errResponse
+		}
+		if containerTemplate != nil {
+			return newChildContainerOwnershipTarget(containerTemplate, resource.ID, resourcePath, anchorPath), nil
+		}
+		parentPath, ok := parentResourcePath(resourcePath)
+		if ok {
+			parentTemplate, parentErrResponse := templateForParent(tx, parentPath, "")
+			if parentErrResponse == nil {
+				return newManagedOwnershipTarget(parentTemplate, resource.ID, resourcePath), nil
+			}
+		}
+		return nil, newErrorResponse(fmt.Sprintf("ownership template not found for %s", resourcePath), 404, &err)
 	}
-	return &template, resource.ID, nil
+	return newManagedOwnershipTarget(&template, resource.ID, resourcePath), nil
+}
+
+func templateForResource(tx *sqlx.Tx, resourcePath string) (*ownershipTemplate, int64, *ErrorResponse) {
+	target, errResponse := resolveOwnershipTarget(tx, resourcePath)
+	if errResponse != nil {
+		return nil, 0, errResponse
+	}
+	return target.Template, target.ResourceID, nil
+}
+
+func templateForChildContainer(tx *sqlx.Tx, resourcePath string) (*ownershipTemplate, string, *ErrorResponse) {
+	resourcePath = cleanResourcePath(resourcePath)
+	pathParts := strings.Split(strings.Trim(resourcePath, "/"), "/")
+	if len(pathParts) < 2 {
+		return nil, "", nil
+	}
+	containerName := pathParts[len(pathParts)-1]
+	parentPath := "/" + strings.Join(pathParts[:len(pathParts)-1], "/")
+	parentPathParts := strings.Split(strings.Trim(parentPath, "/"), "/")
+	if len(parentPathParts) < 1 {
+		return nil, "", nil
+	}
+	parentCreatePath := "/" + strings.Join(parentPathParts[:len(parentPathParts)-1], "/")
+
+	templates, err := listOwnershipTemplates(tx)
+	if err != nil {
+		return nil, "", newErrorResponse(fmt.Sprintf("ownership template query failed: %s", err.Error()), 500, &err)
+	}
+	template, err := matchChildContainerTemplate(templates, containerName, parentCreatePath)
+	if err != nil {
+		return nil, "", newErrorResponse(err.Error(), 500, &err)
+	}
+	if template != nil {
+		return template, parentPath, nil
+	}
+	return nil, "", nil
+}
+
+func matchChildContainerTemplate(templates []ownershipTemplate, containerName string, parentCreatePath string) (*ownershipTemplate, error) {
+	for _, template := range templates {
+		if !template.ChildContainerName.Valid || template.ChildContainerName.String != containerName {
+			continue
+		}
+		matched, err := regexp.MatchString(template.ParentPathPattern, parentCreatePath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ownership template pattern %s: %s", template.Name, err.Error())
+		}
+		if matched {
+			return &template, nil
+		}
+	}
+	return nil, nil
 }
 
 func listOwnershipTemplates(tx *sqlx.Tx) ([]ownershipTemplate, error) {

@@ -11,17 +11,17 @@ import (
 func (server *Server) handleAccessGrantUser(w http.ResponseWriter, r *http.Request, body []byte) {
 	var request accessUserRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		_ = newErrorResponse(fmt.Sprintf("could not parse access grant request: %s", err.Error()), 400, nil).write(w, r)
+		server.writeError(w, r, newErrorResponse(fmt.Sprintf("could not parse access grant request: %s", err.Error()), 400, nil))
 		return
 	}
 	caller, errResponse := server.usernameFromBearer(r)
 	if errResponse != nil {
-		_ = errResponse.write(w, r)
+		server.writeError(w, r, errResponse)
 		return
 	}
 	request = normalizeAccessUserRequest(request)
 	if errResponse := server.requireOwnershipControl(caller, request.ResourcePath); errResponse != nil {
-		_ = errResponse.write(w, r)
+		server.writeError(w, r, errResponse)
 		return
 	}
 	var response *accessUserResponse
@@ -30,7 +30,7 @@ func (server *Server) handleAccessGrantUser(w http.ResponseWriter, r *http.Reque
 		response, txErr = grantUserAccess(tx, request, caller)
 		return txErr
 	}); errResponse != nil {
-		_ = errResponse.write(w, r)
+		server.writeError(w, r, errResponse)
 		return
 	}
 	_ = jsonResponseFrom(response, http.StatusOK).write(w, r)
@@ -39,17 +39,17 @@ func (server *Server) handleAccessGrantUser(w http.ResponseWriter, r *http.Reque
 func (server *Server) handleAccessRevokeUser(w http.ResponseWriter, r *http.Request, body []byte) {
 	var request accessUserRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		_ = newErrorResponse(fmt.Sprintf("could not parse access revoke request: %s", err.Error()), 400, nil).write(w, r)
+		server.writeError(w, r, newErrorResponse(fmt.Sprintf("could not parse access revoke request: %s", err.Error()), 400, nil))
 		return
 	}
 	caller, errResponse := server.usernameFromBearer(r)
 	if errResponse != nil {
-		_ = errResponse.write(w, r)
+		server.writeError(w, r, errResponse)
 		return
 	}
 	request = normalizeAccessUserRequest(request)
 	if errResponse := server.requireOwnershipControl(caller, request.ResourcePath); errResponse != nil {
-		_ = errResponse.write(w, r)
+		server.writeError(w, r, errResponse)
 		return
 	}
 	var response *accessUserResponse
@@ -58,7 +58,7 @@ func (server *Server) handleAccessRevokeUser(w http.ResponseWriter, r *http.Requ
 		response, txErr = revokeUserAccess(tx, request)
 		return txErr
 	}); errResponse != nil {
-		_ = errResponse.write(w, r)
+		server.writeError(w, r, errResponse)
 		return
 	}
 	_ = jsonResponseFrom(response, http.StatusOK).write(w, r)
