@@ -28,7 +28,16 @@ func (server *Server) handleAccessGrantUser(w http.ResponseWriter, r *http.Reque
 	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
 		var txErr *ErrorResponse
 		response, txErr = grantUserAccess(tx, request, caller)
-		return txErr
+		if txErr != nil {
+			return txErr
+		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpResourceAuthzEpochTx(tx, request.ResourcePath); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeUser, request.Username)
 	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
@@ -56,7 +65,16 @@ func (server *Server) handleAccessRevokeUser(w http.ResponseWriter, r *http.Requ
 	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
 		var txErr *ErrorResponse
 		response, txErr = revokeUserAccess(tx, request)
-		return txErr
+		if txErr != nil {
+			return txErr
+		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpResourceAuthzEpochTx(tx, request.ResourcePath); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeUser, request.Username)
 	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return

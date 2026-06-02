@@ -672,7 +672,7 @@ type AuthMapping map[string][]Action
 // and `logged-in` groups.
 func authMappingForUser(db *sqlx.DB, username string) (AuthMapping, *ErrorResponse) {
 	mappingQuery := []AuthMappingQuery{}
-	stmt := `
+	stmt := fmt.Sprintf(`
 		SELECT DISTINCT resource.path, permission.service, permission.method
 		FROM
 		(
@@ -693,8 +693,22 @@ func authMappingForUser(db *sqlx.DB, username string) (AuthMapping, *ErrorRespon
 		INNER JOIN resource AS roots ON roots.id = policy_resource.resource_id
 		INNER JOIN policy_role ON policy_role.policy_id = policies.policy_id
 		INNER JOIN permission ON permission.role_id = policy_role.role_id
-		INNER JOIN resource ON resource.path <@ roots.path
-	`
+		INNER JOIN resource ON (
+			(
+				permission.service = 'arborist'
+				AND permission.method = '%s'
+				AND resource.path = roots.path
+			)
+			OR
+			(
+				NOT (
+					permission.service = 'arborist'
+					AND permission.method = '%s'
+				)
+				AND resource.path <@ roots.path
+			)
+		)
+	`, createDescendantMethod, createDescendantMethod)
 	err := db.Select(
 		&mappingQuery,
 		stmt,
@@ -719,7 +733,7 @@ func authMappingForUser(db *sqlx.DB, username string) (AuthMapping, *ErrorRespon
 // authMappingForGroups returns the auth mapping of resources associated with groups.
 func authMappingForGroups(db *sqlx.DB, groups ...string) (AuthMapping, *ErrorResponse) {
 	mappingQuery := []AuthMappingQuery{}
-	stmt := `
+	stmt := fmt.Sprintf(`
 		SELECT DISTINCT resource.path, permission.service, permission.method
 		FROM
 		(
@@ -731,8 +745,22 @@ func authMappingForGroups(db *sqlx.DB, groups ...string) (AuthMapping, *ErrorRes
 		INNER JOIN resource AS roots ON roots.id = policy_resource.resource_id
 		INNER JOIN policy_role ON policy_role.policy_id = policies.policy_id
 		INNER JOIN permission ON permission.role_id = policy_role.role_id
-		INNER JOIN resource ON resource.path <@ roots.path
-	`
+		INNER JOIN resource ON (
+			(
+				permission.service = 'arborist'
+				AND permission.method = '%s'
+				AND resource.path = roots.path
+			)
+			OR
+			(
+				NOT (
+					permission.service = 'arborist'
+					AND permission.method = '%s'
+				)
+				AND resource.path <@ roots.path
+			)
+		)
+	`, createDescendantMethod, createDescendantMethod)
 	// sqlx.In allows safely binding variable numbers of arguments as bindvars.
 	// See https://jmoiron.github.io/sqlx/#inQueries,
 	query, args, err := sqlx.In(stmt, groups)
@@ -765,7 +793,7 @@ func authMappingForGroups(db *sqlx.DB, groups ...string) (AuthMapping, *ErrorRes
 // throw an error, but will return an empty response.
 func authMappingForClient(db *sqlx.DB, clientID string) (AuthMapping, *ErrorResponse) {
 	mappingQuery := []AuthMappingQuery{}
-	stmt := `
+	stmt := fmt.Sprintf(`
 		SELECT DISTINCT resource.path, permission.service, permission.method
 		FROM
 		(
@@ -777,8 +805,22 @@ func authMappingForClient(db *sqlx.DB, clientID string) (AuthMapping, *ErrorResp
 		INNER JOIN resource AS roots ON roots.id = policy_resource.resource_id
 		INNER JOIN policy_role ON policy_role.policy_id = policies.policy_id
 		INNER JOIN permission ON permission.role_id = policy_role.role_id
-		INNER JOIN resource ON resource.path <@ roots.path
-	`
+		INNER JOIN resource ON (
+			(
+				permission.service = 'arborist'
+				AND permission.method = '%s'
+				AND resource.path = roots.path
+			)
+			OR
+			(
+				NOT (
+					permission.service = 'arborist'
+					AND permission.method = '%s'
+				)
+				AND resource.path <@ roots.path
+			)
+		)
+	`, createDescendantMethod, createDescendantMethod)
 	err := db.Select(
 		&mappingQuery,
 		stmt,

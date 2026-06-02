@@ -13,6 +13,7 @@ VALUES
     ((SELECT id FROM role WHERE name = 'owner'), 'owner_read', '*', 'read'),
     ((SELECT id FROM role WHERE name = 'owner'), 'owner_create', '*', 'create'),
     ((SELECT id FROM role WHERE name = 'owner'), 'owner_update', '*', 'update'),
+    ((SELECT id FROM role WHERE name = 'owner'), 'owner_delete', '*', 'delete'),
     ((SELECT id FROM role WHERE name = 'owner'), 'owner_write_storage', '*', 'write-storage'),
     ((SELECT id FROM role WHERE name = 'owner'), 'owner_read_storage', '*', 'read-storage'),
     ((SELECT id FROM role WHERE name = 'owner'), 'owner_create_descendant', 'arborist', 'create-descendant'),

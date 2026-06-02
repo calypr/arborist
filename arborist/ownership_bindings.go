@@ -21,6 +21,7 @@ func ensureOwnershipBaseRoles(tx *sqlx.Tx, ownerRole string) *ErrorResponse {
 		{"owner_read", "*", "read"},
 		{"owner_create", "*", "create"},
 		{"owner_update", "*", "update"},
+		{"owner_delete", "*", "delete"},
 		{"owner_write_storage", "*", "write-storage"},
 		{"owner_read_storage", "*", "read-storage"},
 		{"owner_create_descendant", "arborist", createDescendantMethod},

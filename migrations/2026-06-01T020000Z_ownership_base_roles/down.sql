@@ -10,6 +10,7 @@ AND (
             'owner_read',
             'owner_create',
             'owner_update',
+            'owner_delete',
             'owner_write_storage',
             'owner_read_storage',
             'owner_create_descendant',

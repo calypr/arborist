@@ -78,6 +78,43 @@ func (server *Server) authorizeCreateDescendant(username string, parentPath stri
 
 func (server *Server) requireOwnershipControl(username string, resourcePath string) *ErrorResponse {
 	resourcePath = cleanResourcePath(resourcePath)
+	if errResponse := server.requireDirectOwner(username, resourcePath); errResponse == nil {
+		return nil
+	} else if errResponse.HTTPError.Code >= http.StatusInternalServerError {
+		return errResponse
+	}
+	return server.requireAuthzMethod(username, resourcePath, "arborist", "manage-owners", "ownership authorization")
+}
+
+func (server *Server) requireOwnershipDeleteControl(username string, resourcePath string) *ErrorResponse {
+	resourcePath = cleanResourcePath(resourcePath)
+	if errResponse := server.requireDirectOwner(username, resourcePath); errResponse == nil {
+		return nil
+	} else if errResponse.HTTPError.Code >= http.StatusInternalServerError {
+		return errResponse
+	}
+
+	allowed := []struct {
+		service string
+		method  string
+	}{
+		{service: "arborist", method: "manage-owners"},
+		{service: "*", method: "delete"},
+	}
+	for _, permission := range allowed {
+		errResponse := server.requireAuthzMethod(username, resourcePath, permission.service, permission.method, "ownership delete authorization")
+		if errResponse == nil {
+			return nil
+		}
+		if errResponse.HTTPError.Code >= http.StatusInternalServerError {
+			return errResponse
+		}
+	}
+	return newErrorResponse(fmt.Sprintf("user is not allowed to delete ownership resource %s", resourcePath), http.StatusForbidden, nil)
+}
+
+func (server *Server) requireDirectOwner(username string, resourcePath string) *ErrorResponse {
+	resourcePath = cleanResourcePath(resourcePath)
 	var count int
 	stmt := `
 		SELECT COUNT(*)
@@ -94,19 +131,23 @@ func (server *Server) requireOwnershipControl(username string, resourcePath stri
 	if count > 0 {
 		return nil
 	}
+	return newErrorResponse(fmt.Sprintf("user is not an owner for %s", resourcePath), http.StatusForbidden, nil)
+}
+
+func (server *Server) requireAuthzMethod(username string, resourcePath string, service string, method string, context string) *ErrorResponse {
 	request := &AuthRequest{
 		Username: username,
 		Resource: resourcePath,
-		Service:  "arborist",
-		Method:   "manage-owners",
+		Service:  service,
+		Method:   method,
 		stmts:    server.stmts,
 	}
 	auth, err := authorizeUser(request)
 	if err != nil {
-		return newErrorResponse(fmt.Sprintf("ownership authorization failed: %s", err.Error()), 500, &err)
+		return newErrorResponse(fmt.Sprintf("%s failed: %s", context, err.Error()), 500, &err)
 	}
 	if !auth.Auth {
-		return newErrorResponse(fmt.Sprintf("user is not allowed to manage ownership for %s", resourcePath), http.StatusForbidden, nil)
+		return newErrorResponse(fmt.Sprintf("user is not allowed to %s:%s on %s", service, method, resourcePath), http.StatusForbidden, nil)
 	}
 	return nil
 }

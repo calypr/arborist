@@ -77,6 +77,23 @@ func (server *Server) createOwnedDescendant(username string, request descendantC
 				}
 			}
 		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpResourceAuthzEpochTx(tx, request.ParentPath); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpResourceAuthzEpochTx(tx, childPath); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpSubjectAuthzEpochTx(tx, subjectTypeUser, username); errResponse != nil {
+			return errResponse
+		}
+		for _, groupName := range template.DefaultAdminGroups {
+			if errResponse := bumpSubjectAuthzEpochTx(tx, subjectTypeGroup, groupName); errResponse != nil {
+				return errResponse
+			}
+		}
 		response = &descendantCreateResponse{
 			Resource:      resourceFromQuery.standardize(),
 			Template:      template.Name,

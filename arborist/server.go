@@ -64,6 +64,7 @@ func (server *Server) Init() (*Server, error) {
 	if server.logger == nil {
 		return nil, errors.New("arborist server initialized without logger")
 	}
+	configureAuthzEpochRedis(server.logger)
 
 	return server, nil
 }
@@ -810,6 +811,10 @@ func (server *Server) handlePolicyCreate(w http.ResponseWriter, r *http.Request,
 		server.writeError(w, r, errResponse)
 		return
 	}
+	if errResponse := transactify(server.db, bumpGlobalAuthzEpochTx); errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
 	server.logger.Info("created policy %s", policy.Name)
 	created := struct {
 		Created *Policy `json:"created"`
@@ -828,6 +833,10 @@ func (server *Server) overwritePolicy(w http.ResponseWriter, r *http.Request, po
 	}
 	errResponse := transactify(server.db, policy.updateInDb)
 	if errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return errResponse
+	}
+	if errResponse := transactify(server.db, bumpGlobalAuthzEpochTx); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return errResponse
 	}
@@ -908,6 +917,10 @@ func (server *Server) handlePolicyDelete(w http.ResponseWriter, r *http.Request)
 		server.writeError(w, r, errResponse)
 		return
 	}
+	if errResponse := transactify(server.db, bumpGlobalAuthzEpochTx); errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
 	server.logger.Info("deleted policy %s", name)
 	_ = jsonResponseFrom(nil, http.StatusNoContent).write(w, r)
 }
@@ -964,11 +977,22 @@ func (server *Server) handleResourceCreate(w http.ResponseWriter, r *http.Reques
 		_, mergeFlag := r.URL.Query()["merge"]
 		updateResource := func(tx *sqlx.Tx) *ErrorResponse {
 			resource.updateInDb(tx, mergeFlag)
-			return nil
+			if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+				return errResponse
+			}
+			return bumpResourceAuthzEpochTx(tx, resource.Path)
 		}
 		errResponse = transactify(server.db, updateResource)
 	} else {
-		errResponse = transactify(server.db, resource.createInDb)
+		errResponse = transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+			if errResponse := resource.createInDb(tx); errResponse != nil {
+				return errResponse
+			}
+			if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+				return errResponse
+			}
+			return bumpResourceAuthzEpochTx(tx, resource.Path)
+		})
 	}
 	if errResponse != nil && errResponse.HTTPError.Code != 409 {
 		// `transactify` returns 500 if there was a SQL error. Here we'll assume
@@ -1062,7 +1086,15 @@ func (server *Server) handleResourceReadByTag(w http.ResponseWriter, r *http.Req
 func (server *Server) handleResourceDelete(w http.ResponseWriter, r *http.Request) {
 	path := parseResourcePath(r)
 	resource := ResourceIn{Path: path}
-	errResponse := transactify(server.db, resource.deleteInDb)
+	errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+		if errResponse := resource.deleteInDb(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		return bumpResourceAuthzEpochTx(tx, resource.Path)
+	})
 	if errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
@@ -1103,6 +1135,10 @@ func (server *Server) handleRoleCreate(w http.ResponseWriter, r *http.Request, b
 	}
 	errResponse := role.createInDb(server.db)
 	if errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
+	if errResponse := transactify(server.db, bumpGlobalAuthzEpochTx); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
 	}
@@ -1169,6 +1205,10 @@ func (server *Server) handleRoleOverwrite(w http.ResponseWriter, r *http.Request
 			server.writeError(w, r, errResponse)
 			return
 		}
+		if errResponse := transactify(server.db, bumpGlobalAuthzEpochTx); errResponse != nil {
+			server.writeError(w, r, errResponse)
+			return
+		}
 		server.logger.Info("created role %s", role.Name)
 		created := struct {
 			Created *Role `json:"created"`
@@ -1181,6 +1221,10 @@ func (server *Server) handleRoleOverwrite(w http.ResponseWriter, r *http.Request
 
 	errResponse = role.overwriteInDb(server.db)
 	if errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
+	if errResponse := transactify(server.db, bumpGlobalAuthzEpochTx); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
 	}
@@ -1198,6 +1242,10 @@ func (server *Server) handleRoleDelete(w http.ResponseWriter, r *http.Request) {
 	role := &Role{Name: name}
 	errResponse := role.deleteInDb(server.db)
 	if errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
+	if errResponse := transactify(server.db, bumpGlobalAuthzEpochTx); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
 	}
@@ -1637,6 +1685,15 @@ func (server *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request, 
 		server.writeError(w, r, errResponse)
 		return
 	}
+	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeGroup, group.Name)
+	}); errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
 	if r.Method == "PUT" {
 		server.logger.Info("overwrote group %s", group.Name)
 	} else {
@@ -1677,6 +1734,15 @@ func (server *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) 
 		server.writeError(w, r, errResponse)
 		return
 	}
+	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeGroup, group.Name)
+	}); errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
 	_ = jsonResponseFrom(nil, http.StatusNoContent).write(w, r)
 }
 
@@ -1711,6 +1777,18 @@ func (server *Server) handleGroupAddUser(w http.ResponseWriter, r *http.Request,
 		server.writeError(w, r, errResponse)
 		return
 	}
+	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpSubjectAuthzEpochTx(tx, subjectTypeUser, requestUser.Username); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeGroup, groupName)
+	}); errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
 	server.logger.Info("added user %s to group %s", requestUser.Username, groupName)
 	_ = jsonResponseFrom(nil, http.StatusNoContent).write(w, r)
 }
@@ -1720,6 +1798,18 @@ func (server *Server) handleGroupRemoveUser(w http.ResponseWriter, r *http.Reque
 	username := mux.Vars(r)["username"]
 	errResponse := removeUserFromGroup(server.db, username, groupName, getAuthZProvider(r))
 	if errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
+	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpSubjectAuthzEpochTx(tx, subjectTypeUser, username); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeGroup, groupName)
+	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
 	}
@@ -1744,6 +1834,15 @@ func (server *Server) handleGroupGrantPolicy(w http.ResponseWriter, r *http.Requ
 		server.writeError(w, r, errResponse)
 		return
 	}
+	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeGroup, groupName)
+	}); errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
 	_ = jsonResponseFrom(nil, http.StatusNoContent).write(w, r)
 }
 
@@ -1752,6 +1851,15 @@ func (server *Server) handleGroupRevokePolicy(w http.ResponseWriter, r *http.Req
 	policyName := mux.Vars(r)["policyName"]
 	errResponse := revokeGroupPolicy(server.db, groupName, policyName, getAuthZProvider(r))
 	if errResponse != nil {
+		server.writeError(w, r, errResponse)
+		return
+	}
+	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeGroup, groupName)
+	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
 	}

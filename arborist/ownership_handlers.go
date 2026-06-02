@@ -51,13 +51,19 @@ func (server *Server) handleOwnershipResourceDelete(w http.ResponseWriter, r *ht
 		server.writeError(w, r, errResponse)
 		return
 	}
-	if errResponse := server.requireOwnershipControl(caller, resourcePath); errResponse != nil {
+	if errResponse := server.requireOwnershipDeleteControl(caller, resourcePath); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
 	}
 
 	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
-		return deleteOwnershipResource(tx, resourcePath)
+		if errResponse := deleteOwnershipResource(tx, resourcePath); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		return bumpResourceAuthzEpochTx(tx, resourcePath)
 	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
@@ -107,7 +113,16 @@ func (server *Server) handleOwnershipAddOwner(w http.ResponseWriter, r *http.Req
 		if errResponse != nil {
 			return errResponse
 		}
-		return ensureOwnerBindingForTarget(tx, target, request.Username, caller)
+		if errResponse := ensureOwnerBindingForTarget(tx, target, request.Username, caller); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpResourceAuthzEpochTx(tx, request.ResourcePath); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeUser, request.Username)
 	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
@@ -131,7 +146,16 @@ func (server *Server) handleOwnershipRemoveOwner(w http.ResponseWriter, r *http.
 		return
 	}
 	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
-		return removeOwnerBinding(tx, request.ResourcePath, request.Username)
+		if errResponse := removeOwnerBinding(tx, request.ResourcePath, request.Username); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpResourceAuthzEpochTx(tx, request.ResourcePath); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeUser, request.Username)
 	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
@@ -163,7 +187,16 @@ func (server *Server) handleOwnershipGrantUser(w http.ResponseWriter, r *http.Re
 			msg := fmt.Sprintf("role %s is not delegable for template %s", request.RoleID, target.Template.Name)
 			return newErrorResponse(msg, 400, nil)
 		}
-		return ensureDelegatedUserBindingForTarget(tx, target, request.Username, request.RoleID, caller)
+		if errResponse := ensureDelegatedUserBindingForTarget(tx, target, request.Username, request.RoleID, caller); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpResourceAuthzEpochTx(tx, request.ResourcePath); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeUser, request.Username)
 	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return
@@ -187,7 +220,16 @@ func (server *Server) handleOwnershipRevokeUser(w http.ResponseWriter, r *http.R
 		return
 	}
 	if errResponse := transactify(server.db, func(tx *sqlx.Tx) *ErrorResponse {
-		return removeDelegatedUserBinding(tx, request.ResourcePath, request.Username, request.RoleID)
+		if errResponse := removeDelegatedUserBinding(tx, request.ResourcePath, request.Username, request.RoleID); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpGlobalAuthzEpochTx(tx); errResponse != nil {
+			return errResponse
+		}
+		if errResponse := bumpResourceAuthzEpochTx(tx, request.ResourcePath); errResponse != nil {
+			return errResponse
+		}
+		return bumpSubjectAuthzEpochTx(tx, subjectTypeUser, request.Username)
 	}); errResponse != nil {
 		server.writeError(w, r, errResponse)
 		return

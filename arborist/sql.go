@@ -65,13 +65,16 @@ func transactify(db *sqlx.DB, call func(tx *sqlx.Tx) *ErrorResponse) *ErrorRespo
 	errResponse := call(tx)
 	if errResponse != nil {
 		errResponse.log.Info("rolling back transaction")
+		_ = popAuthzEpochTouches(tx)
 		_ = tx.Rollback()
 		return errResponse
 	}
 	err = tx.Commit()
 	if err != nil {
+		_ = popAuthzEpochTouches(tx)
 		msg := fmt.Sprintf("couldn't commit database transaction: %s", err.Error())
 		return newErrorResponse(msg, 500, &err)
 	}
+	syncCommittedAuthzEpochTouches(popAuthzEpochTouches(tx))
 	return nil
 }

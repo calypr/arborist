@@ -3089,6 +3089,50 @@ func TestServer(t *testing.T) {
 				testAnonymousAuthMappingResponse(t, w)
 			})
 
+			t.Run("GET_createDescendantDoesNotExpandToDescendants", func(t *testing.T) {
+				createResourceBytes(t, []byte(`{"path": "/programs"}`))
+				createResourceBytes(t, []byte(`{"path": "/programs/smmart"}`))
+				createResourceBytes(t, []byte(`{"path": "/programs/smmart/projects"}`))
+
+				createRoleBytes(
+					t,
+					[]byte(`{
+						"id": "loggedin-create-descendant-role",
+						"permissions": [
+							{"id": "loggedin-create-descendant-permission", "action": {"service": "arborist", "method": "create-descendant"}}
+						]
+					}`),
+				)
+				createPolicyBytes(
+					t,
+					[]byte(`{
+						"id": "loggedin-create-descendant-policy",
+						"resource_paths": ["/programs"],
+						"role_ids": ["loggedin-create-descendant-role"]
+					}`),
+				)
+				grantGroupPolicy(t, arborist.LoggedInGroup, "loggedin-create-descendant-policy")
+
+				w := httptest.NewRecorder()
+				req := newRequest("GET", "/auth/mapping", nil)
+				token := TestJWT{username: username}
+				req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token.Encode()))
+				handler.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusOK, w.Code, "expected a 200 OK")
+
+				result := make(arborist.AuthMapping)
+				err = json.Unmarshal(w.Body.Bytes(), &result)
+				if err != nil {
+					httpError(t, w, "couldn't read response from auth mapping")
+				}
+
+				expectedAction := arborist.Action{Service: "arborist", Method: "create-descendant"}
+				assert.Contains(t, result, "/programs")
+				assert.Contains(t, result["/programs"], expectedAction)
+				assert.NotContains(t, result, "/programs/smmart")
+				assert.NotContains(t, result, "/programs/smmart/projects")
+			})
+
 			t.Run("GET_expiredPolicy", func(t *testing.T) {
 				expiredTimestamp := time.Now().Add(time.Duration(-1) * time.Minute).Format(time.RFC3339)
 				grantUserPolicy(t, username, policyName, expiredTimestamp)
