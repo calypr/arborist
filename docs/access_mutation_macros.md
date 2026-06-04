@@ -17,9 +17,9 @@ In Gen3 deployments these routes are exposed through revproxy as:
 - `DELETE /authz/access/user`
 
 The macro is intentionally RBAC-shaped. The caller provides a resource path, a
-username, and a role id. Arborist decides whether the request maps to an
-ownership-generated delegated binding, a safe legacy direct user-policy grant,
-or a grant source that must be rejected rather than guessed at.
+username, and a role id. Arborist decides whether the request maps to a safe
+direct user-policy grant or a grant source that must be rejected rather than
+guessed at.
 
 The design rule is simple: clients express access intent; Arborist owns graph
 classification, mutation safety, and provenance handling.
@@ -30,7 +30,6 @@ Arborist is the source of truth for resources, roles, policies, users, groups,
 and bindings. It is also the only service that can correctly distinguish these
 cases:
 
-- ownership-generated delegated user access
 - direct legacy user-policy access
 - inherited ancestor access
 - group-derived access
@@ -53,7 +52,6 @@ The ownership APIs remain the correct API for ownership concepts:
 
 - `/ownership/descendant` creates missing resources and materializes ownership.
 - `/ownership/owner` adds or removes resource owners.
-- `/ownership/user` handles ownership-managed delegated bindings directly.
 - `/ownership/resource` reads ownership and direct-access state for a resource
   tree.
 
@@ -111,9 +109,8 @@ The grant path:
 - validates request shape and target identity
 - verifies caller management authority
 - resolves the resource template and validates the requested role
-- creates or reuses a generated direct delegated policy for exactly the target
-  user, target resource, and requested role
-- records provenance through the ownership metadata model where applicable
+- creates or reuses a direct policy for exactly the target resource and
+  requested role
 - returns the resulting direct binding state
 
 The macro does not create missing resources. Missing resource creation remains
@@ -130,8 +127,6 @@ The revoke path:
 
 - validates request shape and target identity
 - verifies caller management authority
-- removes matching ownership-generated delegated grants for the exact user,
-  resource, and role
 - removes matching legacy direct user-policy grants only when the policy is
   exact and narrow
 - reports inherited, group-derived, protected, or broad grants as rejected
@@ -154,9 +149,6 @@ A grant is removable by the macro when all of these are true:
 - removing it does not require splitting a broad multi-resource or multi-role
   policy
 
-Ownership-generated delegated grants are removable when their metadata matches
-the requested tuple.
-
 Legacy direct user-policy grants are removable only when their policy shape is
 exact. Arborist deletes the narrow direct grant rather than trying to infer a
 caller-safe rewrite of a broader policy.
@@ -169,7 +161,6 @@ The macro rejects, rather than partially mutates, these grant sources:
 - group-derived access
 - protected admin or recovery access
 - owner access
-- generated bindings with a different binding kind
 - broad direct policies with multiple resources
 - broad direct policies with multiple roles
 - grants where deleting the row would affect a different user, role, or
@@ -241,33 +232,28 @@ The macro must preserve these invariants:
 - No caller can mutate owner semantics through direct access APIs.
 - Exact direct grants can be removed without needing the frontend to understand
   policy storage details.
-- Generated ownership metadata remains the source of truth for
-  ownership-managed delegated grants.
 
 ## Implementation Notes
 
 Core implementation lives in:
 
-- `arborist/access.go`
-- `arborist/access_handlers.go`
-- `arborist/ownership_bindings.go`
-- `arborist/ownership_templates.go`
-- `arborist/ownership_auth.go`
+- `internal/access/access.go`
+- `internal/httpapi/access_handlers.go`
+- `internal/ownership/ownership_bindings.go`
+- `internal/ownership/ownership_templates.go`
+- `internal/httpapi/ownership_auth.go`
 
-The route registration lives in `arborist/server.go`.
+The route registration lives in `internal/httpapi/server.go`.
 
-The access macro shares generated-binding deletion logic with ownership code
-but keeps ownership-only behavior out of the RBAC-shaped endpoint. This keeps
-`/ownership/user` semantically narrow while allowing `/access/user` to bridge
-generated delegation and safe legacy direct RBAC.
+The access macro keeps ownership-only behavior out of the RBAC-shaped endpoint
+and only manages direct user-policy grants.
 
 ## Testing Requirements
 
 Server tests should cover:
 
-- grant creates or reuses an exact generated direct access binding
+- grant creates or reuses an exact direct access binding
 - grant rejects roles that are not valid for the target resource/template
-- revoke removes generated delegated direct access
 - revoke removes exact legacy direct user-policy access
 - revoke rejects inherited access
 - revoke rejects group-derived access

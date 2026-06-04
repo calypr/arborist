@@ -1,5 +1,9 @@
 # GitHub-Style Descendant Ownership
 
+For a branch-level overview of how this document fits into
+`feature/github-permissions`, see
+[github_permissions.md](github_permissions.md).
+
 ## Summary
 
 This branch adds an ownership materialization macro for creating missing
@@ -98,7 +102,8 @@ Important fields:
 - `owner_role`: role bound to generated owner policies.
 - `admin_role`: role bound to protected admin policies.
 - `default_admin_groups`: groups that receive protected recovery access.
-- `delegable_roles`: roles owners are allowed to delegate through owner APIs.
+- `delegable_roles`: roles that the access macro allows for direct user grants
+  on this template.
 
 Initial templates:
 
@@ -129,7 +134,6 @@ This stores the subject, target resource, template, binding kind, protection
 flag, creator, timestamp, and JSON provenance. It lets Arborist distinguish:
 
 - owner bindings
-- delegated user bindings
 - protected administrator recovery bindings
 
 ## Generated Roles And Policies
@@ -194,19 +198,12 @@ Route: `DELETE /ownership/owner`
 Removes an owner binding. A resource is allowed to have zero explicit owners;
 site administrators can always recover access through normal admin policy.
 
-### Delegate User Access
-
-Routes: `POST /ownership/user`, `DELETE /ownership/user`
-
-Adds or removes a non-admin generated user binding for a delegable role. The
-role must be listed in the template's `delegable_roles`.
-
 The initial Calypr project-creation wizard only calls
 `POST /ownership/descendant`. The owner endpoints are used by owner-management
-UI. For ordinary project role management, prefer the access macro API described
-in [access_mutation_macros.md](access_mutation_macros.md). That API gives the
+UI. For ordinary project role management, use the access macro API described in
+[access_mutation_macros.md](access_mutation_macros.md). That API gives the
 frontend a stable RBAC-shaped interface and lets Arborist decide whether a grant
-is ownership-generated or old-style direct RBAC.
+is an exact direct RBAC assignment or something that should be rejected.
 
 ## Calypr Project Creation Flow
 

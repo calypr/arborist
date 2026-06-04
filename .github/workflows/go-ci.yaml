@@ -51,5 +51,12 @@ jobs:
       - name: Set up database
         run: ./migrations/latest
 
+      - name: Build root package
+        run: go build .
+
       - name: Run tests
-        run: go test ./arborist -count=1
+        run: go test ./... -count=1
+
+      - name: Run public import smoke test
+        working-directory: testdata/public-import
+        run: go test ./... -count=1
