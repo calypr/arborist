@@ -1218,6 +1218,122 @@ func TestServer(t *testing.T) {
 		tearDown(t)
 	})
 
+	t.Run("OwnershipResourceDelete", func(t *testing.T) {
+		tearDown := testSetup(t)
+
+		createResourceBytes(t, []byte(`{"path": "/programs"}`))
+		createGroupBytes(t, []byte(`{"name": "administrators"}`))
+		createRoleBytes(
+			t,
+			[]byte(`{
+				"id": "administrator",
+				"permissions": [
+					{"id": "administrator-all", "action": {"service": "*", "method": "*"}}
+				]
+			}`),
+		)
+		createPolicyBytes(
+			t,
+			[]byte(`{
+				"id": "platform-admin",
+				"resource_paths": ["/programs"],
+				"role_ids": ["administrator"]
+			}`),
+		)
+		createRoleBytes(
+			t,
+			[]byte(`{
+				"id": "loggedin-create-descendant-role",
+				"permissions": [
+					{"id": "loggedin-create-descendant-permission", "action": {"service": "arborist", "method": "create-descendant"}}
+				]
+			}`),
+		)
+		createPolicyBytes(
+			t,
+			[]byte(`{
+				"id": "loggedin-create-descendant-policy",
+				"resource_paths": ["/programs"],
+				"role_ids": ["loggedin-create-descendant-role"]
+			}`),
+		)
+		grantGroupPolicy(t, "administrators", "platform-admin")
+		grantGroupPolicy(t, coreauthz.LoggedInGroup, "loggedin-create-descendant-policy")
+
+		creator := "project.creator@example.org"
+		admin := "platform.admin@example.org"
+		outsider := "outsider@example.org"
+		createUserBytes(t, []byte(fmt.Sprintf(`{"name": %q}`, creator)))
+		createUserBytes(t, []byte(fmt.Sprintf(`{"name": %q}`, admin)))
+		createUserBytes(t, []byte(fmt.Sprintf(`{"name": %q}`, outsider)))
+		addUserToGroup(t, admin, "administrators")
+
+		createDescendant := func(t *testing.T, username string, body []byte) {
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/ownership/descendant", bytes.NewBuffer(body))
+			token := TestJWT{username: username}
+			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token.Encode()))
+			handler.ServeHTTP(w, req)
+			if w.Code != http.StatusCreated {
+				httpError(t, w, "couldn't create owned descendant")
+			}
+		}
+		createDescendant(t, creator, []byte(`{"parent_path": "/programs", "name": "admin_delete_org"}`))
+		createDescendant(t, creator, []byte(`{"parent_path": "/programs/admin_delete_org/projects", "name": "victim_project"}`))
+
+		projectPath := "/programs/admin_delete_org/projects/victim_project"
+
+		t.Run("GenericResourceDeleteStillRejectsProtectedGeneratedOwnership", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("DELETE", "/resource"+projectPath, nil)
+			handler.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code, "generic resource delete should still protect generated ownership")
+		})
+
+		t.Run("OutsiderCannotDeleteOwnedResource", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("DELETE", "/ownership/resource?resource_path="+url.QueryEscape(projectPath), nil)
+			token := TestJWT{username: outsider}
+			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token.Encode()))
+			handler.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code, "outsider should not be allowed to delete ownership resource")
+		})
+
+		t.Run("AdminWildcardPermissionDeletesProtectedGeneratedOwnershipResource", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("DELETE", "/ownership/resource?resource_path="+url.QueryEscape(projectPath), nil)
+			token := TestJWT{username: admin}
+			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token.Encode()))
+			handler.ServeHTTP(w, req)
+			if w.Code != http.StatusNoContent {
+				httpError(t, w, "admin couldn't delete ownership resource")
+			}
+
+			w = httptest.NewRecorder()
+			req = newRequest("GET", "/resource"+projectPath, nil)
+			handler.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code, "deleted ownership resource should not remain readable")
+
+			var count int
+			err = db.Get(
+				&count,
+				`
+					SELECT COUNT(*)
+					FROM generated_policy_metadata
+					JOIN resource ON generated_policy_metadata.resource_id = resource.id
+					WHERE resource.path = text2ltree($1)
+				`,
+				coreauthz.FormatPathForDb(projectPath),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, 0, count, "generated ownership metadata should be removed with the resource")
+		})
+
+		tearDown(t)
+	})
+
 	t.Run("Role", func(t *testing.T) {
 		tearDown := testSetup(t)
 

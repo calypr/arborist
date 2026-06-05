@@ -242,6 +242,8 @@ APIs:
 - Protected generated policies cannot be overwritten.
 - Resources with protected generated ownership cannot be deleted through the
   generic resource delete path.
+- Authorized lifecycle teardown for generated ownership resources must use
+  `DELETE /ownership/resource`, after ownership-delete control has passed.
 - Owners cannot revoke protected administrator-derived access.
 
 These rules are meant to keep self-service creation from producing resources

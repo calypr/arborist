@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	coreauthz "github.com/calypr/arborist/internal/authz/core"
-	"github.com/calypr/arborist/internal/authz/protection"
 	"github.com/calypr/arborist/internal/authz/store/resource"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
@@ -153,15 +152,17 @@ func DeleteOwnershipResource(tx *sqlx.Tx, resourcePath string) *coreauthz.ErrorR
 	if resourcePath == "" || resourcePath == "/" {
 		return coreauthz.NewErrorResponse("resource_path is required", 400, nil)
 	}
-	protected, errResponse := protection.ResourceHasProtectedOwnership(tx, resourcePath)
-	if errResponse != nil {
-		return errResponse
+	stmt := `
+		DELETE FROM policy
+		USING generated_policy_metadata, resource
+		WHERE policy.id = generated_policy_metadata.policy_id
+		AND generated_policy_metadata.resource_id = resource.id
+		AND resource.path = text2ltree($1)
+	`
+	if _, err := tx.Exec(stmt, coreauthz.FormatPathForDb(resourcePath)); err != nil {
+		return coreauthz.NewErrorResponse(fmt.Sprintf("failed to delete generated ownership policies for %s: %s", resourcePath, err.Error()), 500, &err)
 	}
-	if protected {
-		msg := fmt.Sprintf("cannot delete resource with protected generated ownership: %s", resourcePath)
-		return coreauthz.NewErrorResponse(msg, 403, nil)
-	}
-	stmt := "DELETE FROM resource WHERE path = $1"
+	stmt = "DELETE FROM resource WHERE path = $1"
 	_, err := tx.Exec(stmt, coreauthz.FormatPathForDb(resourcePath))
 	if err != nil {
 		return nil
