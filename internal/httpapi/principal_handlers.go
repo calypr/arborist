@@ -7,9 +7,9 @@ import (
 	"time"
 
 	coreauthz "github.com/calypr/arborist/internal/authz/core"
+	"github.com/calypr/arborist/internal/authz/engine"
 	"github.com/calypr/arborist/internal/authz/epoch"
 	principalstore "github.com/calypr/arborist/internal/authz/store/principal"
-	"github.com/calypr/arborist/internal/authz/engine"
 	"github.com/gorilla/mux"
 	"github.com/jmoiron/sqlx"
 )

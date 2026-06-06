@@ -143,7 +143,7 @@ func userWithName(db *sqlx.DB, name string) (*UserFromQuery, error) {
 	err := db.Select(
 		&users,
 		stmt,
-		strings.ToLower(name), // $1
+		strings.ToLower(name),    // $1
 		coreauthz.AnonymousGroup, // $2
 		coreauthz.LoggedInGroup,  // $3
 	)

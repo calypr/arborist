@@ -274,7 +274,7 @@ func (server *Server) handleResourceCreate(w http.ResponseWriter, r *http.Reques
 	if errResponse != nil {
 		server.logger.Info("not creating resource %s (%s), already exists", out.Path, out.Tag)
 		result := struct {
-			Error  coreauthz.HTTPError         `json:"error"`
+			Error  coreauthz.HTTPError        `json:"error"`
 			Exists *resourcestore.ResourceOut `json:"exists"`
 		}{Error: errResponse.HTTPError, Exists: &out}
 		_ = jsonResponseFrom(result, 409).write(w, r)

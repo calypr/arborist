@@ -39,7 +39,7 @@ type ExpandedPolicy struct {
 	Name          string   `json:"id"`
 	Description   string   `json:"description"`
 	ResourcePaths []string `json:"resource_paths"`
-	Roles         []Role `json:"roles"`
+	Roles         []Role   `json:"roles"`
 }
 
 // UnmarshalJSON defines the way that a `Policy` gets read when unmarshalling:

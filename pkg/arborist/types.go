@@ -3,8 +3,8 @@ package arborist
 import (
 	coreauthz "github.com/calypr/arborist/internal/authz/core"
 	"github.com/calypr/arborist/internal/authz/engine"
-	principal "github.com/calypr/arborist/internal/authz/store/principal"
 	"github.com/calypr/arborist/internal/authz/store/policy"
+	principal "github.com/calypr/arborist/internal/authz/store/principal"
 	"github.com/calypr/arborist/internal/authz/store/resource"
 )
 
