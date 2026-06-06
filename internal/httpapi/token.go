@@ -99,8 +99,8 @@ func (server *Server) usernameFromBearer(r *http.Request) (string, *coreauthz.Er
 	if authHeader == "" {
 		return "", coreauthz.NewErrorResponse("Authorization header is required", http.StatusUnauthorized, nil)
 	}
-	token := strings.TrimPrefix(authHeader, "bearer ")
-	if token == authHeader {
+	authScheme, token, found := strings.Cut(authHeader, " ")
+	if !found || !strings.EqualFold(authScheme, "bearer") {
 		return "", coreauthz.NewErrorResponse("Authorization header must use bearer token scheme", http.StatusUnauthorized, nil)
 	}
 	token = strings.TrimSpace(token)
