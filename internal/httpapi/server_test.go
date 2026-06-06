@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	coreauthz "github.com/calypr/arborist/internal/authz/core"
+	"github.com/calypr/arborist/internal/authz/engine"
 	arborist "github.com/calypr/arborist/internal/httpapi"
 	authz "github.com/calypr/arborist/pkg/arborist"
 )
@@ -3126,6 +3127,15 @@ func TestServer(t *testing.T) {
 				assert.Contains(t, result[resourcePath], action, msg)
 			}
 
+			currentAnonymousAndLoggedInMappings := func(t *testing.T) authz.AuthMapping {
+				t.Helper()
+				expectedMappings, errResponse := engine.AuthMappingForGroups(db, coreauthz.AnonymousGroup, coreauthz.LoggedInGroup)
+				if errResponse != nil {
+					t.Fatalf("couldn't load current anonymous/logged-in auth mappings: %v", errResponse)
+				}
+				return authz.AuthMapping(expectedMappings)
+			}
+
 			t.Run("GET_usernameQueryParam", func(t *testing.T) {
 				// this endpoint should not handle the "username" query parameter anymore
 				w := httptest.NewRecorder()
@@ -3185,13 +3195,7 @@ func TestServer(t *testing.T) {
 				if err != nil {
 					httpError(t, w, "couldn't read response from auth mapping")
 				}
-				expectedMappings := make(authz.AuthMapping)
-				for k, v := range anonymousAuthMapping {
-					expectedMappings[k] = v
-				}
-				for k, v := range loggedInAuthMapping {
-					expectedMappings[k] = v
-				}
+				expectedMappings := currentAnonymousAndLoggedInMappings(t)
 				msg := fmt.Sprintf("Expected response to be these auth mappings from anonymous and logged-in groups: %v", expectedMappings)
 				for resource, actions := range result {
 					assert.Contains(t, expectedMappings, resource, msg)
@@ -3293,13 +3297,7 @@ func TestServer(t *testing.T) {
 					if err != nil {
 						httpError(t, w, "couldn't read response from auth mapping")
 					}
-					expectedMappings := make(authz.AuthMapping)
-					for k, v := range anonymousAuthMapping {
-						expectedMappings[k] = v
-					}
-					for k, v := range loggedInAuthMapping {
-						expectedMappings[k] = v
-					}
+					expectedMappings := currentAnonymousAndLoggedInMappings(t)
 					msg := fmt.Sprintf("Expected response to be these auth mappings from anonymous and logged-in groups: %v", expectedMappings)
 					for resource, actions := range result {
 						assert.Contains(t, expectedMappings, resource, msg)
@@ -3376,13 +3374,7 @@ func TestServer(t *testing.T) {
 					if err != nil {
 						httpError(t, w, "couldn't read response from auth mapping")
 					}
-					expectedMappings := make(authz.AuthMapping)
-					for k, v := range anonymousAuthMapping {
-						expectedMappings[k] = v
-					}
-					for k, v := range loggedInAuthMapping {
-						expectedMappings[k] = v
-					}
+					expectedMappings := currentAnonymousAndLoggedInMappings(t)
 					msg := fmt.Sprintf("Expected response to be these auth mappings from anonymous and logged-in groups: %v", expectedMappings)
 					for resource, actions := range result {
 						assert.Contains(t, expectedMappings, resource, msg)
