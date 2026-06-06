@@ -107,11 +107,11 @@ func ResourceWithPathTx(tx *sqlx.Tx, path string) (*resource.ResourceFromQuery, 
 	return resourceWithPathTx(tx, path)
 }
 
-func EnsureOwnershipBaseRoles(tx *sqlx.Tx, ownerRole string) *coreauthz.ErrorResponse {
+func ensureOwnershipBaseRolesForTemplate(tx *sqlx.Tx, ownerRole string) *coreauthz.ErrorResponse {
 	return ensureOwnershipBaseRoles(tx, ownerRole)
 }
 
-func EnsureOwnerBinding(tx *sqlx.Tx, template *OwnershipTemplate, resourceID int64, resourcePath string, username string, createdBy string) *coreauthz.ErrorResponse {
+func ensureOwnerBindingForTemplate(tx *sqlx.Tx, template *OwnershipTemplate, resourceID int64, resourcePath string, username string, createdBy string) *coreauthz.ErrorResponse {
 	return ensureOwnerBinding(tx, template, resourceID, resourcePath, username, createdBy)
 }
 
@@ -119,7 +119,7 @@ func EnsureOwnerBindingForTarget(tx *sqlx.Tx, target *OwnershipTarget, username 
 	return ensureOwnerBindingForTarget(tx, target, username, createdBy)
 }
 
-func EnsureProtectedAdminBinding(tx *sqlx.Tx, template *OwnershipTemplate, resourceID int64, resourcePath string, groupName string, createdBy string) (string, *coreauthz.ErrorResponse) {
+func ensureProtectedAdminBindingForTemplate(tx *sqlx.Tx, template *OwnershipTemplate, resourceID int64, resourcePath string, groupName string, createdBy string) (string, *coreauthz.ErrorResponse) {
 	return ensureProtectedAdminBinding(tx, template, resourceID, resourcePath, groupName, createdBy)
 }
 
@@ -135,7 +135,7 @@ func RoleIDByName(tx *sqlx.Tx, roleName string) (int64, *coreauthz.ErrorResponse
 	return roleIDByName(tx, roleName)
 }
 
-func AttachPolicyToResource(tx *sqlx.Tx, policyName string, resourceID int64) *coreauthz.ErrorResponse {
+func attachPolicyToResourceByName(tx *sqlx.Tx, policyName string, resourceID int64) *coreauthz.ErrorResponse {
 	return attachPolicyToResource(tx, policyName, resourceID)
 }
 
@@ -143,11 +143,11 @@ func EnsureUser(tx *sqlx.Tx, username string) *coreauthz.ErrorResponse {
 	return ensureUser(tx, username)
 }
 
-func RemoveOwnerBinding(tx *sqlx.Tx, resourcePath string, username string) *coreauthz.ErrorResponse {
+func removeOwnerBindingForResource(tx *sqlx.Tx, resourcePath string, username string) *coreauthz.ErrorResponse {
 	return removeOwnerBinding(tx, resourcePath, username)
 }
 
-func DeleteOwnershipResource(tx *sqlx.Tx, resourcePath string) *coreauthz.ErrorResponse {
+func deleteOwnershipResource(tx *sqlx.Tx, resourcePath string) *coreauthz.ErrorResponse {
 	resourcePath = coreauthz.CleanResourcePath(resourcePath)
 	if resourcePath == "" || resourcePath == "/" {
 		return coreauthz.NewErrorResponse("resource_path is required", 400, nil)
@@ -170,7 +170,7 @@ func DeleteOwnershipResource(tx *sqlx.Tx, resourcePath string) *coreauthz.ErrorR
 	return nil
 }
 
-func GeneratedPolicyName(kind string, resourcePath string, roleID string) string {
+func generatedPolicyNameForRole(kind string, resourcePath string, roleID string) string {
 	return generatedPolicyName(kind, resourcePath, roleID)
 }
 

@@ -228,6 +228,44 @@ sequenceDiagram
     Gecko-->>Frontend: Project appears in Git explorer
 ```
 
+## Inheritance Materialization During Repo Initialization
+
+The reason descendant ownership exists at all is that Gecko repo initialization
+needs a usable Arborist inheritance shape before the repo can behave like a
+real Calypr project.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Gecko
+    participant Arborist
+    participant Syfon
+
+    User->>Gecko: Initialize org/project for Git-backed repo
+    alt Org resource missing
+        Gecko->>Arborist: POST /authz/ownership/descendant parent=/programs template=gen3-program
+        Arborist-->>Gecko: Create /programs/<org> and /programs/<org>/projects
+        Note over Arborist: materialize owner policy plus admin recovery bindings
+    end
+    Gecko->>Arborist: POST /authz/ownership/descendant parent=/programs/<org>/projects template=gen3-project
+    Arborist-->>Gecko: Create /programs/<org>/projects/<project>
+    Note over Arborist: creator gains owner access; inherited create-descendant stays scoped to the org container
+    Gecko->>Syfon: Configure project storage scope on same resource path
+    Syfon-->>Gecko: Storage aligned to /programs/<org>/projects/<project>
+    Gecko-->>User: Repo now maps to a first-class Calypr project
+```
+
+What this diagram is trying to show is the inheritance value added by the new
+methods:
+
+- creating `/programs/<org>` also materializes the `projects` container that
+  future project creation depends on
+- the owner/admin policies are attached as concrete Arborist graph state, not
+  left as a caller convention
+- project creation stays scoped to the immediate container through
+  `create-descendant`, rather than requiring broad write access on unrelated
+  descendants
+
 Submit order matters. Arborist comes first because Syfon and Gecko are scoped by
 the authz resource that the new project needs. If Syfon succeeds but Gecko
 fails, the project remains pending in Gecko and the frontend retries the Gecko

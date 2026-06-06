@@ -24,6 +24,8 @@ FROM alpine:3.22
 RUN apk add --no-cache bash ca-certificates jq libcap postgresql15-client
 COPY --from=build-deps /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build-deps /tmp/arborist /usr/local/bin/arborist
+WORKDIR /app
+COPY migrations /app/migrations
 RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/arborist
 USER nobody
 CMD ["/usr/local/bin/arborist"]

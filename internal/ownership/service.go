@@ -170,7 +170,7 @@ func (s *Service) CreateOwnedDescendant(username string, request DescendantCreat
 			return coreauthz.NewErrorResponse(fmt.Sprintf("resource already exists: %s", childPath), 409, nil)
 		}
 
-		if errResponse := EnsureOwnershipBaseRoles(tx, template.OwnerRole); errResponse != nil {
+		if errResponse := ensureOwnershipBaseRolesForTemplate(tx, template.OwnerRole); errResponse != nil {
 			return errResponse
 		}
 		childResource := &resource.ResourceIn{Path: childPath, Description: request.Description}
@@ -189,12 +189,12 @@ func (s *Service) CreateOwnedDescendant(username string, request DescendantCreat
 			return coreauthz.NewErrorResponse("resource was not found after create", 500, nil)
 		}
 
-		if errResponse := EnsureOwnerBinding(tx, template, resourceFromQuery.ID, childPath, username, username); errResponse != nil {
+		if errResponse := ensureOwnerBindingForTemplate(tx, template, resourceFromQuery.ID, childPath, username, username); errResponse != nil {
 			return errResponse
 		}
 		adminPolicies := []string{}
 		for _, groupName := range template.DefaultAdminGroups {
-			policyName, errResponse := EnsureProtectedAdminBinding(tx, template, resourceFromQuery.ID, childPath, groupName, username)
+			policyName, errResponse := ensureProtectedAdminBindingForTemplate(tx, template, resourceFromQuery.ID, childPath, groupName, username)
 			if errResponse != nil {
 				return errResponse
 			}
@@ -209,9 +209,9 @@ func (s *Service) CreateOwnedDescendant(username string, request DescendantCreat
 			if container == nil {
 				return coreauthz.NewErrorResponse(fmt.Sprintf("container resource was not found after create: %s", containerPath), 500, nil)
 			}
-			policiesToAttach := append([]string{GeneratedPolicyName("owner", childPath, template.OwnerRole)}, adminPolicies...)
+			policiesToAttach := append([]string{generatedPolicyNameForRole("owner", childPath, template.OwnerRole)}, adminPolicies...)
 			for _, policyName := range policiesToAttach {
-				if errResponse := AttachPolicyToResource(tx, policyName, container.ID); errResponse != nil {
+				if errResponse := attachPolicyToResourceByName(tx, policyName, container.ID); errResponse != nil {
 					return errResponse
 				}
 			}
@@ -236,7 +236,7 @@ func (s *Service) CreateOwnedDescendant(username string, request DescendantCreat
 		response = &DescendantCreateResponse{
 			Resource:      resourceFromQuery.Standardize(),
 			Template:      template.Name,
-			OwnerPolicy:   GeneratedPolicyName("owner", childPath, template.OwnerRole),
+			OwnerPolicy:   generatedPolicyNameForRole("owner", childPath, template.OwnerRole),
 			AdminPolicies: adminPolicies,
 			Owners:        []string{username},
 		}
@@ -257,7 +257,7 @@ func (s *Service) DeleteResource(caller string, resourcePath string) *coreauthz.
 		return errResponse
 	}
 	return epoch.Transactify(s.DB, func(tx *sqlx.Tx) *coreauthz.ErrorResponse {
-		if errResponse := DeleteOwnershipResource(tx, resourcePath); errResponse != nil {
+		if errResponse := deleteOwnershipResource(tx, resourcePath); errResponse != nil {
 			return errResponse
 		}
 		if errResponse := epoch.BumpGlobalAuthzEpochTx(tx); errResponse != nil {
@@ -296,7 +296,7 @@ func (s *Service) RemoveOwner(caller string, request OwnerMutationRequest) *core
 		return errResponse
 	}
 	return epoch.Transactify(s.DB, func(tx *sqlx.Tx) *coreauthz.ErrorResponse {
-		if errResponse := RemoveOwnerBinding(tx, request.ResourcePath, request.Username); errResponse != nil {
+		if errResponse := removeOwnerBindingForResource(tx, request.ResourcePath, request.Username); errResponse != nil {
 			return errResponse
 		}
 		if errResponse := epoch.BumpGlobalAuthzEpochTx(tx); errResponse != nil {
