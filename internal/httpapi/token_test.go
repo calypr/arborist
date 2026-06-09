@@ -69,3 +69,28 @@ func TestUsernameFromBearer(t *testing.T) {
 		}
 	})
 }
+
+func TestDecodeTokenPolicies(t *testing.T) {
+	server := &Server{
+		logger: coreauthz.NewLogHandler(log.New(io.Discard, "", 0)),
+		jwtApp: &stubJWTDecoder{
+			claims: map[string]interface{}{
+				"scope": []interface{}{"openid"},
+				"exp":   float64(4102444800),
+				"sub":   "0",
+				"context": map[string]interface{}{
+					"user": map[string]interface{}{
+						"name":     "User@Example.org",
+						"policies": []interface{}{"alpha", "beta"},
+					},
+				},
+			},
+		},
+	}
+
+	info, err := server.decodeToken("fake-token", []string{"openid"})
+
+	assert.NoError(t, err)
+	assert.Equal(t, "User@Example.org", info.Username)
+	assert.Equal(t, []string{"alpha", "beta"}, info.Policies)
+}

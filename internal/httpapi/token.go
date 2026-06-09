@@ -68,7 +68,7 @@ func (server *Server) decodeToken(token string, scopes []string) (*coreauthz.Tok
 			if !casted {
 				return nil, fieldTypeError("policies")
 			}
-			policies := make([]string, len(policiesInterfaceSlice))
+			policies = make([]string, len(policiesInterfaceSlice))
 			for i, policyInterface := range policiesInterfaceSlice {
 				policyString, casted := policyInterface.(string)
 				if !casted {

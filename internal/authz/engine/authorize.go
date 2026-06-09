@@ -104,6 +104,65 @@ func AuthorizeAnonymous(request *AuthRequest) (*AuthResponse, error) {
 	return authorizeAnonymous(request)
 }
 
+func authorizeUserWithResourceMatcher(request *AuthRequest, resourceCondition string) (*AuthResponse, error) {
+	var authorized []bool
+	var err error
+
+	resource := coreauthz.FormatPathForDb(request.Resource)
+	query := `
+		SELECT coalesce(EXISTS (
+			SELECT 1
+			FROM (
+				SELECT usr_policy.policy_id FROM usr
+				INNER JOIN usr_policy ON usr_policy.usr_id = usr.id
+				WHERE LOWER(usr.name) = $1 AND (usr_policy.expires_at IS NULL OR NOW() < usr_policy.expires_at)
+				UNION
+				SELECT grp_policy.policy_id FROM usr
+				INNER JOIN usr_grp ON usr_grp.usr_id = usr.id
+				INNER JOIN grp_policy ON grp_policy.grp_id = usr_grp.grp_id
+				WHERE LOWER(usr.name) = $1 AND (usr_grp.expires_at IS NULL OR NOW() < usr_grp.expires_at)
+				UNION
+				SELECT grp_policy.policy_id FROM grp
+				INNER JOIN grp_policy ON grp_policy.grp_id = grp.id
+				WHERE grp.name IN ($7, $8)
+			) AS policies
+			JOIN policy_resource ON policy_resource.policy_id = policies.policy_id
+			JOIN resource ON resource.id = policy_resource.resource_id
+			WHERE ` + resourceCondition + `
+			AND EXISTS (
+				SELECT 1 FROM policy_role
+				JOIN permission ON permission.role_id = policy_role.role_id
+				WHERE policy_role.policy_id = policies.policy_id
+				AND (permission.service = $2 OR permission.service = '*')
+				AND (permission.method = $3 OR permission.method = '*')
+			) AND (
+				$4 OR policies.policy_id IN (
+					SELECT id FROM policy
+					WHERE policy.name = ANY($5)
+				)
+			)
+		), FALSE)
+	`
+
+	err = request.stmts.Select(
+		query,
+		&authorized,
+		strings.ToLower(request.Username), // $1
+		request.Service,                   // $2
+		request.Method,                    // $3
+		len(request.Policies) == 0,        // $4
+		pq.Array(request.Policies),        // $5
+		resource,                          // $6
+		coreauthz.AnonymousGroup,          // $7
+		coreauthz.LoggedInGroup,           // $8
+	)
+	if err != nil {
+		return nil, err
+	}
+	result := len(authorized) > 0 && authorized[0]
+	return &AuthResponse{result}, nil
+}
+
 // Authorize the given token to access resources by service and method.
 func authorizeUser(request *AuthRequest) (*AuthResponse, error) {
 	var authorized []bool
@@ -120,49 +179,7 @@ func authorizeUser(request *AuthRequest) (*AuthResponse, error) {
 	}
 
 	if resource != "" {
-		err = request.stmts.Select(
-			`
-			SELECT coalesce(text2ltree($6) <@ allowed, FALSE) FROM (
-				SELECT array_agg(resource.path) AS allowed FROM (
-					SELECT usr_policy.policy_id FROM usr
-					INNER JOIN usr_policy ON usr_policy.usr_id = usr.id
-					WHERE LOWER(usr.name) = $1 AND (usr_policy.expires_at IS NULL OR NOW() < usr_policy.expires_at)
-					UNION
-					SELECT grp_policy.policy_id FROM usr
-					INNER JOIN usr_grp ON usr_grp.usr_id = usr.id
-					INNER JOIN grp_policy ON grp_policy.grp_id = usr_grp.grp_id
-					WHERE LOWER(usr.name) = $1 AND (usr_grp.expires_at IS NULL OR NOW() < usr_grp.expires_at)
-					UNION
-					SELECT grp_policy.policy_id FROM grp
-					INNER JOIN grp_policy ON grp_policy.grp_id = grp.id
-					WHERE grp.name IN ($7, $8)
-				) AS policies
-				JOIN policy_resource ON policy_resource.policy_id = policies.policy_id
-				JOIN resource ON resource.id = policy_resource.resource_id
-				WHERE EXISTS (
-					SELECT 1 FROM policy_role
-					JOIN permission ON permission.role_id = policy_role.role_id
-					WHERE policy_role.policy_id = policies.policy_id
-					AND (permission.service = $2 OR permission.service = '*')
-					AND (permission.method = $3 OR permission.method = '*')
-				) AND (
-					$4 OR policies.policy_id IN (
-						SELECT id FROM policy
-						WHERE policy.name = ANY($5)
-					)
-				)
-			) _
-			`,
-			&authorized,
-			strings.ToLower(request.Username), // $1
-			request.Service,                   // $2
-			request.Method,                    // $3
-			len(request.Policies) == 0,        // $4
-			pq.Array(request.Policies),        // $5
-			resource,                          // $6
-			coreauthz.AnonymousGroup,          // $7
-			coreauthz.LoggedInGroup,           // $8
-		)
+		return authorizeUserWithResourceMatcher(request, "text2ltree($6) <@ resource.path")
 	} else if tag != "" {
 		err = request.stmts.Select(
 			`
@@ -219,6 +236,13 @@ func authorizeUser(request *AuthRequest) (*AuthResponse, error) {
 
 func AuthorizeUser(request *AuthRequest) (*AuthResponse, error) {
 	return authorizeUser(request)
+}
+
+func AuthorizeUserExact(request *AuthRequest) (*AuthResponse, error) {
+	if !strings.HasPrefix(request.Resource, "/") {
+		return nil, errors.New("missing resource in auth request")
+	}
+	return authorizeUserWithResourceMatcher(request, "resource.path = text2ltree($6)")
 }
 
 // This is similar to authorizeUser, only that this method checks for clientID only

@@ -17,58 +17,152 @@ type Service struct {
 	Stmts *coreauthz.CachedStmts
 }
 
+type descendantCreateState struct {
+	template       *OwnershipTemplate
+	childPath      string
+	resource       *resource.ResourceFromQuery
+	adminPolicies  []string
+	ownerPolicy    string
+	responseOwners []string
+}
+
 func NewService(db *sqlx.DB, stmts *coreauthz.CachedStmts) *Service {
 	return &Service{DB: db, Stmts: stmts}
 }
 
 func (s *Service) authorizeCreateDescendant(username string, parentPath string) *coreauthz.ErrorResponse {
-	var authorized bool
-	stmt := `
-		SELECT EXISTS (
-			SELECT 1
-			FROM (
-				SELECT usr_policy.policy_id FROM usr
-				INNER JOIN usr_policy ON usr_policy.usr_id = usr.id
-				WHERE LOWER(usr.name) = $1 AND (usr_policy.expires_at IS NULL OR NOW() < usr_policy.expires_at)
-				UNION
-				SELECT grp_policy.policy_id FROM usr
-				INNER JOIN usr_grp ON usr_grp.usr_id = usr.id
-				INNER JOIN grp_policy ON grp_policy.grp_id = usr_grp.grp_id
-				WHERE LOWER(usr.name) = $1 AND (usr_grp.expires_at IS NULL OR NOW() < usr_grp.expires_at)
-				UNION
-				SELECT grp_policy.policy_id FROM grp
-				INNER JOIN grp_policy ON grp_policy.grp_id = grp.id
-				WHERE grp.name IN ($5, $6)
-			) AS policies
-			JOIN policy_resource ON policy_resource.policy_id = policies.policy_id
-			JOIN resource ON resource.id = policy_resource.resource_id
-			WHERE resource.path = text2ltree($2)
-			AND EXISTS (
-				SELECT 1 FROM policy_role
-				JOIN permission ON permission.role_id = policy_role.role_id
-				WHERE policy_role.policy_id = policies.policy_id
-				AND (permission.service = $3 OR permission.service = '*')
-				AND (permission.method = $4 OR permission.method = '*')
-			)
-		)
-	`
-	err := s.DB.Get(
-		&authorized,
-		stmt,
-		strings.ToLower(username),
-		coreauthz.FormatPathForDb(parentPath),
-		"arborist",
-		coreauthz.CreateDescendantMethod,
-		coreauthz.AnonymousGroup,
-		coreauthz.LoggedInGroup,
-	)
+	request := (&engine.AuthRequest{
+		Username: username,
+		Resource: parentPath,
+		Service:  "arborist",
+		Method:   coreauthz.CreateDescendantMethod,
+	}).WithStmts(s.Stmts)
+	auth, err := engine.AuthorizeUserExact(request)
 	if err != nil {
 		return coreauthz.NewErrorResponse(fmt.Sprintf("create-descendant authorization failed: %s", err.Error()), 500, &err)
 	}
-	if !authorized {
+	if !auth.Auth {
 		return coreauthz.NewErrorResponse(fmt.Sprintf("user is not allowed to create descendants under %s", parentPath), http.StatusForbidden, nil)
 	}
 	return nil
+}
+
+func (s *Service) validateDescendantCreateRequest(request DescendantCreateRequest) (DescendantCreateRequest, string, *coreauthz.ErrorResponse) {
+	request.ParentPath = coreauthz.CleanResourcePath(request.ParentPath)
+	request.Name = strings.TrimSpace(request.Name)
+	if request.ParentPath == "" || request.Name == "" || strings.Contains(request.Name, "/") {
+		return request, "", coreauthz.NewErrorResponse("parent_path and a single path-segment name are required", 400, nil)
+	}
+	childPath := coreauthz.CleanResourcePath(request.ParentPath + "/" + request.Name)
+	return request, childPath, nil
+}
+
+func (s *Service) prepareDescendantTemplate(tx *sqlx.Tx, parentPath string, requestedTemplate string) (*OwnershipTemplate, *coreauthz.ErrorResponse) {
+	template, errResponse := TemplateForParent(tx, parentPath, requestedTemplate)
+	if errResponse != nil {
+		return nil, errResponse
+	}
+	if errResponse := ensureOwnershipBaseRolesForTemplate(tx, template.OwnerRole); errResponse != nil {
+		return nil, errResponse
+	}
+	return template, nil
+}
+
+func (s *Service) createDescendantResource(tx *sqlx.Tx, childPath string, description *string, template *OwnershipTemplate) (*resource.ResourceFromQuery, *coreauthz.ErrorResponse) {
+	if existing, err := ResourceWithPathTx(tx, childPath); err != nil {
+		return nil, coreauthz.NewErrorResponse(fmt.Sprintf("resource lookup failed: %s", err.Error()), 500, &err)
+	} else if existing != nil {
+		return nil, coreauthz.NewErrorResponse(fmt.Sprintf("resource already exists: %s", childPath), 409, nil)
+	}
+
+	childResource := &resource.ResourceIn{Path: childPath, Description: description}
+	if template.ChildContainerName.Valid {
+		childResource.Subresources = []resource.ResourceIn{{Name: template.ChildContainerName.String}}
+	}
+	if errResponse := childResource.CreateRecursively(tx); errResponse != nil {
+		return nil, errResponse
+	}
+
+	resourceFromQuery, err := ResourceWithPathTx(tx, childPath)
+	if err != nil {
+		return nil, coreauthz.NewErrorResponse(fmt.Sprintf("resource lookup failed after create: %s", err.Error()), 500, &err)
+	}
+	if resourceFromQuery == nil {
+		return nil, coreauthz.NewErrorResponse("resource was not found after create", 500, nil)
+	}
+	return resourceFromQuery, nil
+}
+
+func (s *Service) materializeDescendantBindings(tx *sqlx.Tx, template *OwnershipTemplate, resourceID int64, childPath string, username string) (string, []string, []string, *coreauthz.ErrorResponse) {
+	if errResponse := ensureOwnerBindingForTemplate(tx, template, resourceID, childPath, username, username); errResponse != nil {
+		return "", nil, nil, errResponse
+	}
+
+	adminPolicies := []string{}
+	for _, groupName := range template.DefaultAdminGroups {
+		policyName, errResponse := ensureProtectedAdminBindingForTemplate(tx, template, resourceID, childPath, groupName, username)
+		if errResponse != nil {
+			return "", nil, nil, errResponse
+		}
+		adminPolicies = append(adminPolicies, policyName)
+	}
+
+	ownerPolicy := generatedPolicyNameForRole("owner", childPath, template.OwnerRole)
+	return ownerPolicy, adminPolicies, []string{username}, nil
+}
+
+func (s *Service) attachDescendantContainerPolicies(tx *sqlx.Tx, template *OwnershipTemplate, childPath string, ownerPolicy string, adminPolicies []string) *coreauthz.ErrorResponse {
+	if !template.ChildContainerName.Valid {
+		return nil
+	}
+
+	containerPath := childPath + "/" + template.ChildContainerName.String
+	container, err := ResourceWithPathTx(tx, containerPath)
+	if err != nil {
+		return coreauthz.NewErrorResponse(fmt.Sprintf("container lookup failed after create: %s", err.Error()), 500, &err)
+	}
+	if container == nil {
+		return coreauthz.NewErrorResponse(fmt.Sprintf("container resource was not found after create: %s", containerPath), 500, nil)
+	}
+
+	policiesToAttach := append([]string{ownerPolicy}, adminPolicies...)
+	for _, policyName := range policiesToAttach {
+		if errResponse := attachPolicyToResourceByName(tx, policyName, container.ID); errResponse != nil {
+			return errResponse
+		}
+	}
+	return nil
+}
+
+func (s *Service) bumpDescendantEpochs(tx *sqlx.Tx, parentPath string, childPath string, username string, adminGroups []string) *coreauthz.ErrorResponse {
+	if errResponse := epoch.BumpGlobalAuthzEpochTx(tx); errResponse != nil {
+		return errResponse
+	}
+	if errResponse := epoch.BumpResourceAuthzEpochTx(tx, parentPath); errResponse != nil {
+		return errResponse
+	}
+	if errResponse := epoch.BumpResourceAuthzEpochTx(tx, childPath); errResponse != nil {
+		return errResponse
+	}
+	if errResponse := epoch.BumpSubjectAuthzEpochTx(tx, coreauthz.SubjectTypeUser, username); errResponse != nil {
+		return errResponse
+	}
+	for _, groupName := range adminGroups {
+		if errResponse := epoch.BumpSubjectAuthzEpochTx(tx, coreauthz.SubjectTypeGroup, groupName); errResponse != nil {
+			return errResponse
+		}
+	}
+	return nil
+}
+
+func (s *Service) buildDescendantCreateResponse(state *descendantCreateState) *DescendantCreateResponse {
+	return &DescendantCreateResponse{
+		Resource:      state.resource.Standardize(),
+		Template:      state.template.Name,
+		OwnerPolicy:   state.ownerPolicy,
+		AdminPolicies: state.adminPolicies,
+		Owners:        state.responseOwners,
+	}
 }
 
 func (s *Service) RequireOwnershipControl(username string, resourcePath string) *coreauthz.ErrorResponse {
@@ -147,105 +241,42 @@ func (s *Service) requireAuthzMethod(username string, resourcePath string, servi
 }
 
 func (s *Service) CreateOwnedDescendant(username string, request DescendantCreateRequest) (*DescendantCreateResponse, *coreauthz.ErrorResponse) {
-	request.ParentPath = coreauthz.CleanResourcePath(request.ParentPath)
-	request.Name = strings.TrimSpace(request.Name)
-	if request.ParentPath == "" || request.Name == "" || strings.Contains(request.Name, "/") {
-		return nil, coreauthz.NewErrorResponse("parent_path and a single path-segment name are required", 400, nil)
+	request, childPath, errResponse := s.validateDescendantCreateRequest(request)
+	if errResponse != nil {
+		return nil, errResponse
 	}
 	if errResponse := s.authorizeCreateDescendant(username, request.ParentPath); errResponse != nil {
 		return nil, errResponse
 	}
 
-	var response *DescendantCreateResponse
-	errResponse := epoch.Transactify(s.DB, func(tx *sqlx.Tx) *coreauthz.ErrorResponse {
-		template, errResponse := TemplateForParent(tx, request.ParentPath, request.Template)
+	state := &descendantCreateState{childPath: childPath}
+	errResponse = epoch.Transactify(s.DB, func(tx *sqlx.Tx) *coreauthz.ErrorResponse {
+		template, errResponse := s.prepareDescendantTemplate(tx, request.ParentPath, request.Template)
+		if errResponse != nil {
+			return errResponse
+		}
+		state.template = template
+
+		resourceFromQuery, errResponse := s.createDescendantResource(tx, state.childPath, request.Description, state.template)
+		if errResponse != nil {
+			return errResponse
+		}
+		state.resource = resourceFromQuery
+
+		state.ownerPolicy, state.adminPolicies, state.responseOwners, errResponse = s.materializeDescendantBindings(tx, state.template, state.resource.ID, state.childPath, username)
 		if errResponse != nil {
 			return errResponse
 		}
 
-		childPath := coreauthz.CleanResourcePath(request.ParentPath + "/" + request.Name)
-		if existing, err := ResourceWithPathTx(tx, childPath); err != nil {
-			return coreauthz.NewErrorResponse(fmt.Sprintf("resource lookup failed: %s", err.Error()), 500, &err)
-		} else if existing != nil {
-			return coreauthz.NewErrorResponse(fmt.Sprintf("resource already exists: %s", childPath), 409, nil)
-		}
-
-		if errResponse := ensureOwnershipBaseRolesForTemplate(tx, template.OwnerRole); errResponse != nil {
+		if errResponse := s.attachDescendantContainerPolicies(tx, state.template, state.childPath, state.ownerPolicy, state.adminPolicies); errResponse != nil {
 			return errResponse
 		}
-		childResource := &resource.ResourceIn{Path: childPath, Description: request.Description}
-		if template.ChildContainerName.Valid {
-			childResource.Subresources = []resource.ResourceIn{{Name: template.ChildContainerName.String}}
-		}
-		if errResponse := childResource.CreateRecursively(tx); errResponse != nil {
-			return errResponse
-		}
-
-		resourceFromQuery, err := ResourceWithPathTx(tx, childPath)
-		if err != nil {
-			return coreauthz.NewErrorResponse(fmt.Sprintf("resource lookup failed after create: %s", err.Error()), 500, &err)
-		}
-		if resourceFromQuery == nil {
-			return coreauthz.NewErrorResponse("resource was not found after create", 500, nil)
-		}
-
-		if errResponse := ensureOwnerBindingForTemplate(tx, template, resourceFromQuery.ID, childPath, username, username); errResponse != nil {
-			return errResponse
-		}
-		adminPolicies := []string{}
-		for _, groupName := range template.DefaultAdminGroups {
-			policyName, errResponse := ensureProtectedAdminBindingForTemplate(tx, template, resourceFromQuery.ID, childPath, groupName, username)
-			if errResponse != nil {
-				return errResponse
-			}
-			adminPolicies = append(adminPolicies, policyName)
-		}
-		if template.ChildContainerName.Valid {
-			containerPath := childPath + "/" + template.ChildContainerName.String
-			container, err := ResourceWithPathTx(tx, containerPath)
-			if err != nil {
-				return coreauthz.NewErrorResponse(fmt.Sprintf("container lookup failed after create: %s", err.Error()), 500, &err)
-			}
-			if container == nil {
-				return coreauthz.NewErrorResponse(fmt.Sprintf("container resource was not found after create: %s", containerPath), 500, nil)
-			}
-			policiesToAttach := append([]string{generatedPolicyNameForRole("owner", childPath, template.OwnerRole)}, adminPolicies...)
-			for _, policyName := range policiesToAttach {
-				if errResponse := attachPolicyToResourceByName(tx, policyName, container.ID); errResponse != nil {
-					return errResponse
-				}
-			}
-		}
-		if errResponse := epoch.BumpGlobalAuthzEpochTx(tx); errResponse != nil {
-			return errResponse
-		}
-		if errResponse := epoch.BumpResourceAuthzEpochTx(tx, request.ParentPath); errResponse != nil {
-			return errResponse
-		}
-		if errResponse := epoch.BumpResourceAuthzEpochTx(tx, childPath); errResponse != nil {
-			return errResponse
-		}
-		if errResponse := epoch.BumpSubjectAuthzEpochTx(tx, coreauthz.SubjectTypeUser, username); errResponse != nil {
-			return errResponse
-		}
-		for _, groupName := range template.DefaultAdminGroups {
-			if errResponse := epoch.BumpSubjectAuthzEpochTx(tx, coreauthz.SubjectTypeGroup, groupName); errResponse != nil {
-				return errResponse
-			}
-		}
-		response = &DescendantCreateResponse{
-			Resource:      resourceFromQuery.Standardize(),
-			Template:      template.Name,
-			OwnerPolicy:   generatedPolicyNameForRole("owner", childPath, template.OwnerRole),
-			AdminPolicies: adminPolicies,
-			Owners:        []string{username},
-		}
-		return nil
+		return s.bumpDescendantEpochs(tx, request.ParentPath, state.childPath, username, state.template.DefaultAdminGroups)
 	})
 	if errResponse != nil {
 		return nil, errResponse
 	}
-	return response, nil
+	return s.buildDescendantCreateResponse(state), nil
 }
 
 func (s *Service) DeleteResource(caller string, resourcePath string) *coreauthz.ErrorResponse {

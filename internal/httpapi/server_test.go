@@ -3547,6 +3547,69 @@ func TestServer(t *testing.T) {
 				assert.Equal(t, false, result.Auth, msg)
 			})
 
+			t.Run("TokenPoliciesFilterAuthorization", func(t *testing.T) {
+				otherResourcePath := "/policy-filtered-resource"
+				otherRoleName := "policy-filtered-role"
+				otherPolicyName := "policy-filtered-policy"
+				createResourceBytes(t, []byte(fmt.Sprintf(`{"path": "%s"}`, otherResourcePath)))
+				createRoleBytes(t, []byte(fmt.Sprintf(
+					`{
+						"id": "%s",
+						"permissions": [
+							{"id": "policy-filtered-permission", "action": {"service": "%s", "method": "%s"}}
+						]
+					}`,
+					otherRoleName,
+					serviceName,
+					methodName,
+				)))
+				createPolicyBytes(t, []byte(fmt.Sprintf(
+					`{
+						"id": "%s",
+						"resource_paths": ["%s"],
+						"role_ids": ["%s"]
+					}`,
+					otherPolicyName,
+					otherResourcePath,
+					otherRoleName,
+				)))
+				grantUserPolicy(t, username, otherPolicyName, "null")
+
+				w = httptest.NewRecorder()
+				token = TestJWT{username: username, policies: []string{otherPolicyName}}
+				body = []byte(fmt.Sprintf(
+					`{
+						"user": {"token": "%s"},
+						"request": {
+							"resource": "%s",
+							"action": {
+								"service": "%s",
+								"method": "%s"
+							}
+						}
+					}`,
+					token.Encode(),
+					resourcePath,
+					serviceName,
+					methodName,
+				))
+				req = newRequest("POST", "/auth/request", bytes.NewBuffer(body))
+				handler.ServeHTTP(w, req)
+				if w.Code != http.StatusOK {
+					httpError(t, w, "auth request failed")
+				}
+
+				result = struct {
+					Auth bool `json:"auth"`
+				}{}
+				err = json.Unmarshal(w.Body.Bytes(), &result)
+				if err != nil {
+					httpError(t, w, "couldn't read response from auth request")
+				}
+				msg = fmt.Sprintf("got response body: %s", w.Body.String())
+				assert.Equal(t, false, result.Auth, msg)
+			})
+
 			t.Run("ExpiredPolicy", func(t *testing.T) {
 				expiredTimestamp := time.Now().Add(time.Duration(-1) * time.Minute).Format(time.RFC3339)
 				grantUserPolicy(t, username, policyName, expiredTimestamp)
