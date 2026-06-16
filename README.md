@@ -1,7 +1,5 @@
 # Arborist
 
-![GitHub release](https://img.shields.io/github/release/uc-cdis/arborist.svg) [![Build Status](https://travis-ci.com/uc-cdis/arborist.svg?branch=master)](https://travis-ci.com/uc-cdis/arborist) [![Coverage Status](https://coveralls.io/repos/github/uc-cdis/arborist/badge.svg)](https://coveralls.io/github/uc-cdis/arborist)
-
 Arborist is an attribute-based access control (ABAC) policy engine, designed for use with
 the [Gen3 stack](https://gen3.org/). Arborist tracks resources requiring access
 control, along with actions which users may perform to operate on these
@@ -27,9 +25,26 @@ The key documentation is below. Additional documentation can be found in the [/d
 
 ## API documentation
 
-[OpenAPI documentation available here.](http://petstore.swagger.io/?url=https://raw.githubusercontent.com/uc-cdis/arborist/master/docs/openapi.yaml)
+[OpenAPI documentation available here.](http://petstore.swagger.io/?url=https://raw.githubusercontent.com/calypr/arborist/master/docs/openapi.yaml)
 
 The YAML file containing the OpenAPI documentation can be found in the `docs` folder.
+
+## Dynamic Resource Ownership
+
+This branch also adds the Arborist-side permission model for the
+`feature/github-permissions` product flow. See
+[docs/github_permissions.md](docs/github_permissions.md) for a branch-level
+overview of what changed and how the ownership and access APIs fit together.
+
+This fork adds GitHub-style descendant ownership for dynamic Calypr project
+creation. See [docs/descendant_ownership.md](docs/descendant_ownership.md) for
+the architecture, API contracts, invariants, and operational notes.
+
+This fork also adds Arborist access mutation macros for direct owner/admin
+project access management. See
+[docs/access_mutation_macros.md](docs/access_mutation_macros.md) for the
+technical rationale behind `/access/user`, legacy RBAC compatibility, and why
+the macro lives in Arborist instead of Requestor.
 
 ## Setup
 
@@ -43,10 +58,8 @@ You will need these:
 
 ```bash
 # clone it
-go get -u github.com/uc-cdis/arborist
-
-# cd into wherever arborist is cloned (this is the default)
-cd ~/go/src/github.com/uc-cdis/arborist
+git clone https://github.com/calypr/arborist.git
+cd arborist
 
 # build the code
 make
@@ -73,7 +86,7 @@ createdb
 ### Quickstart with Helm
 
 You can now deploy individual services via Helm! 
-Please refer to the Helm quickstart guide HERE (https://github.com/uc-cdis/arborist/blob/master/docs/quickstart_helm.md)
+Please refer to the Helm quickstart guide HERE (https://github.com/calypr/arborist/blob/master/docs/quickstart_helm.md)
 
 ### Building With Docker
 
@@ -96,13 +109,11 @@ documentation for more details on how to use Docker.
 Clone/Build/Install all-in-one command:
 
 ```bash
-go get -u github.com/uc-cdis/arborist
+go install github.com/calypr/arborist/cmd/arborist@latest
 ```
 
-The cloned source code can be found under `$GOPATH`, usually `~/go/` if not set.
-In the source folder, you can run `go install` to rebuild the project. The
-executable can be found under `$GOPATH/bin/`, which you may want to add to your
-`$PATH` if not done yet.
+If you already have a local checkout, you can also run `go build .` from the
+repository root to build the server binary directly.
 
 ### Building From Source
 
@@ -115,13 +126,8 @@ Running `make` will build the code:
 make
 ```
 
-Be aware that the source code must have been
-[cloned correctly](https://github.com/golang/go/wiki/GitHubCodeLayout) into
-`$GOPATH`, see also the previous section. `go build` will not work correctly if
-you cloned the repository outside of the location that `go` expects. One option
-to work around this, if you prefer to work with the code elsewhere in the
-filesystem, is to create a symlink from the desired location to wherever the
-repository lives under `$GOPATH`.
+The project is module-aware, so `go build .` and `go test ./...` work from a
+normal checkout without needing a GOPATH-specific directory layout.
 
 ## Terminology and Definitions
 

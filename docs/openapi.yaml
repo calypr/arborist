@@ -5,7 +5,7 @@ info:
   description: authorization microservice to handle ABAC based on configured policies
   license:
     name: 'Apache 2.0'
-    url: 'https://github.com/uc-cdis/arborist'
+    url: 'https://github.com/calypr/arborist'
 tags:
   - name: auth
     description: make requests to determine authorization

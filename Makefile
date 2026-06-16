@@ -1,17 +1,20 @@
 _default: bin/arborist
 	@:  # if we have a command this silences "nothing to be done"
 
-bin/arborist: arborist/*.go # help: run the server
-	go build -o bin/arborist
+bin/arborist: # help: run the server
+	go build -o bin/arborist .
 
-test: bin/arborist db-test # help: run the tests
-	go test -v ./arborist/
+smoke-test: # help: verify the public import surface from an external module
+	cd testdata/public-import && go test ./...
+
+test: bin/arborist db-test smoke-test # help: run the tests
+	go test -v ./...
 
 coverage-viz: coverage # help: generate test coverage file and run coverage visualizer
 	go tool cover --html=coverage.out
 
 coverage: test # help: generate test coverage file
-	go test --coverprofile=coverage.out ./arborist/
+	go test --coverprofile=coverage.out ./...
 
 db-test: $(which psql) # help: set up the database for testing (run automatically by `test`)
 	@echo 'createdb || true'
@@ -33,6 +36,6 @@ help: # help: show this help
 	@echo "exported the necessary postgres variables: \`PGDATABASE\`, \`PGUSER\`, \`PGHOST\`,"
 	@echo "and \`PGPORT\`. Set \`PGSSLMODE=disable\` if not using SSL. See README for details."
 	@echo ""
-	@echo "The default command is bin/arborist."
+	@echo "The default command is bin/arborist, built from the repository root."
 	@echo ""
 	@grep -h "^.*:.*# help" $(MAKEFILE_LIST) | grep -v grep | sed -e "s/:.*# help:/:/"
