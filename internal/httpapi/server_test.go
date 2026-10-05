@@ -574,9 +574,11 @@ func TestServer(t *testing.T) {
 		grantGroupPolicy(t, coreauthz.AnonymousGroup, policyName)
 
 		// return policy and authMapping
-		policy := authz.Policy{policyName, "", []string{resourcePath}, []string{roleName}}
+		policy := authz.Policy{
+			Name: policyName, ResourcePaths: []string{resourcePath}, RoleIDs: []string{roleName},
+		}
 		authMapping := map[string][]authz.Action{
-			resourcePath: []authz.Action{authz.Action{serviceName, methodName}},
+			resourcePath: {{Service: serviceName, Method: methodName}},
 		}
 		return []authz.Policy{policy}, []string{resourcePath}, authMapping
 	}
@@ -626,9 +628,11 @@ func TestServer(t *testing.T) {
 		grantGroupPolicy(t, coreauthz.LoggedInGroup, policyName)
 
 		// return policy and authMapping
-		policy := authz.Policy{policyName, "", []string{resourcePath}, []string{roleName}}
+		policy := authz.Policy{
+			Name: policyName, ResourcePaths: []string{resourcePath}, RoleIDs: []string{roleName},
+		}
 		authMapping := map[string][]authz.Action{
-			resourcePath: []authz.Action{authz.Action{serviceName, methodName}},
+			resourcePath: {{Service: serviceName, Method: methodName}},
 		}
 		return []authz.Policy{policy}, []string{resourcePath}, authMapping
 	}
