@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/lib/pq"
 )
 
 // multiInsertStmt generates a string for a SQL command to insert multiple rows
@@ -37,13 +39,8 @@ func MultiInsertStmt(table string, n_rows int) string {
 	return fmt.Sprintf("INSERT INTO %s VALUES %s", table, rowsString)
 }
 
-// `values` must be castable to string.
-func SelectInStmt(table string, col string, values []string) string {
-	stmt_values := ""
-	for _, value := range values {
-		stmt_values += fmt.Sprintf("('%s'), ", value)
-	}
-	stmt_values = strings.TrimRight(stmt_values, ", ")
-	stmt := fmt.Sprintf("SELECT %s.* FROM %s INNER JOIN (VALUES %s) values(v) ON %s = v", table, table, stmt_values, col)
-	return stmt
+// Table and column are trusted identifiers; values are bound as a parameter.
+func SelectInStmt(table string, col string, values []string) (string, interface{}) {
+	stmt := fmt.Sprintf("SELECT %s.* FROM %s WHERE %s = ANY($1)", table, table, col)
+	return stmt, pq.Array(values)
 }

@@ -124,8 +124,8 @@ func (group *Group) users(tx *sqlx.Tx) ([]UserFromQuery, error) {
 		return []UserFromQuery{}, nil
 	}
 	users := []UserFromQuery{}
-	usersStmt := coreauthz.SelectInStmt("usr", "name", group.Users)
-	err := tx.Select(&users, usersStmt)
+	usersStmt, usersArg := coreauthz.SelectInStmt("usr", "name", group.Users)
+	err := tx.Select(&users, usersStmt, usersArg)
 	if err != nil {
 		return nil, err
 	}
@@ -137,8 +137,8 @@ func (group *Group) policies(tx *sqlx.Tx) ([]policy.PolicyFromQuery, error) {
 		return []policy.PolicyFromQuery{}, nil
 	}
 	policies := []policy.PolicyFromQuery{}
-	policiesStmt := coreauthz.SelectInStmt("policy", "name", group.Policies)
-	err := tx.Select(&policies, policiesStmt)
+	policiesStmt, policiesArg := coreauthz.SelectInStmt("policy", "name", group.Policies)
+	err := tx.Select(&policies, policiesStmt, policiesArg)
 	if err != nil {
 		return nil, err
 	}
