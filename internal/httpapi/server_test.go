@@ -1768,6 +1768,33 @@ func TestServer(t *testing.T) {
 			assert.NotNil(t, result.Policies[0].Roles, msg)
 		})
 
+		t.Run("ListExpandedWithQuotedRoleName", func(t *testing.T) {
+			quotedRole := "role'quoted"
+			createRoleBytes(t, []byte(fmt.Sprintf(`{"id":%q,"permissions":[{"id":"quoted-role-permission","action":{"service":"test","method":"read"}}]}`, quotedRole)))
+			createPolicyBytes(t, []byte(fmt.Sprintf(`{"id":"quoted-role-policy","resource_paths":["/a/b"],"role_ids":[%q]}`, quotedRole)))
+
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, newRequest("GET", "/policy?expand", nil))
+			if !assert.Equal(t, http.StatusOK, w.Code, w.Body.String()) {
+				return
+			}
+			var result struct {
+				Policies []authz.ExpandedPolicy `json:"policies"`
+			}
+			if !assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &result)) {
+				return
+			}
+			for _, policy := range result.Policies {
+				if policy.Name == "quoted-role-policy" {
+					if assert.Len(t, policy.Roles, 1) {
+						assert.Equal(t, quotedRole, policy.Roles[0].Name)
+					}
+					return
+				}
+			}
+			t.Fatal("quoted-role-policy missing from expanded policies")
+		})
+
 		t.Run("Delete", func(t *testing.T) {
 			w := httptest.NewRecorder()
 			req := newRequest("DELETE", "/policy/foo", nil)

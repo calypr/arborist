@@ -25,7 +25,6 @@ func (server *Server) decodeToken(token string, scopes []string) (*coreauthz.Tok
 		)
 		return errors.New(msg)
 	}
-	server.logger.Debug("decoding token: %s", token)
 	claims, err := server.jwtApp.Decode(token)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding token: %s", err.Error())
