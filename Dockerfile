@@ -1,4 +1,4 @@
-FROM golang:1.26.2-alpine AS build-deps
+FROM golang:1.26.8-alpine AS build-deps
 
 ENV CGO_ENABLED=0
 ENV GOOS=linux

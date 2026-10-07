@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"io"
 	"log"
 	"net/http"
@@ -71,8 +72,9 @@ func TestUsernameFromBearer(t *testing.T) {
 }
 
 func TestDecodeTokenPolicies(t *testing.T) {
+	var logs bytes.Buffer
 	server := &Server{
-		logger: coreauthz.NewLogHandler(log.New(io.Discard, "", 0)),
+		logger: coreauthz.NewLogHandler(log.New(&logs, "", 0)),
 		jwtApp: &stubJWTDecoder{
 			claims: map[string]interface{}{
 				"scope": []interface{}{"openid"},
@@ -93,4 +95,5 @@ func TestDecodeTokenPolicies(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "User@Example.org", info.Username)
 	assert.Equal(t, []string{"alpha", "beta"}, info.Policies)
+	assert.NotContains(t, logs.String(), "fake-token")
 }

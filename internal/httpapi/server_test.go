@@ -574,9 +574,11 @@ func TestServer(t *testing.T) {
 		grantGroupPolicy(t, coreauthz.AnonymousGroup, policyName)
 
 		// return policy and authMapping
-		policy := authz.Policy{policyName, "", []string{resourcePath}, []string{roleName}}
+		policy := authz.Policy{
+			Name: policyName, ResourcePaths: []string{resourcePath}, RoleIDs: []string{roleName},
+		}
 		authMapping := map[string][]authz.Action{
-			resourcePath: []authz.Action{authz.Action{serviceName, methodName}},
+			resourcePath: {{Service: serviceName, Method: methodName}},
 		}
 		return []authz.Policy{policy}, []string{resourcePath}, authMapping
 	}
@@ -626,9 +628,11 @@ func TestServer(t *testing.T) {
 		grantGroupPolicy(t, coreauthz.LoggedInGroup, policyName)
 
 		// return policy and authMapping
-		policy := authz.Policy{policyName, "", []string{resourcePath}, []string{roleName}}
+		policy := authz.Policy{
+			Name: policyName, ResourcePaths: []string{resourcePath}, RoleIDs: []string{roleName},
+		}
 		authMapping := map[string][]authz.Action{
-			resourcePath: []authz.Action{authz.Action{serviceName, methodName}},
+			resourcePath: {{Service: serviceName, Method: methodName}},
 		}
 		return []authz.Policy{policy}, []string{resourcePath}, authMapping
 	}
@@ -1612,6 +1616,17 @@ func TestServer(t *testing.T) {
 				}
 			})
 
+			t.Run("RoleInjection", func(t *testing.T) {
+				w := httptest.NewRecorder()
+				body := []byte(`{"id":"testPolicyRoleInjection","resource_paths":["/test_resource"],"role_ids":["x'); DROP TABLE role; --"]}`)
+				req := newRequest("POST", "/policy", bytes.NewBuffer(body))
+				handler.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+				w = httptest.NewRecorder()
+				handler.ServeHTTP(w, newRequest("GET", "/role", nil))
+				assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			})
+
 			t.Run("ResourceNotExist", func(t *testing.T) {
 				w := httptest.NewRecorder()
 				body := []byte(fmt.Sprintf(
@@ -1755,6 +1770,33 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, 2, len(result.Policies), msg)
 			msg = fmt.Sprintf("expanded policies should contain 'roles'. got response body: %s", w.Body.String())
 			assert.NotNil(t, result.Policies[0].Roles, msg)
+		})
+
+		t.Run("ListExpandedWithQuotedRoleName", func(t *testing.T) {
+			quotedRole := "role'quoted"
+			createRoleBytes(t, []byte(fmt.Sprintf(`{"id":%q,"permissions":[{"id":"quoted-role-permission","action":{"service":"test","method":"read"}}]}`, quotedRole)))
+			createPolicyBytes(t, []byte(fmt.Sprintf(`{"id":"quoted-role-policy","resource_paths":["/a/b"],"role_ids":[%q]}`, quotedRole)))
+
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, newRequest("GET", "/policy?expand", nil))
+			if !assert.Equal(t, http.StatusOK, w.Code, w.Body.String()) {
+				return
+			}
+			var result struct {
+				Policies []authz.ExpandedPolicy `json:"policies"`
+			}
+			if !assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &result)) {
+				return
+			}
+			for _, policy := range result.Policies {
+				if policy.Name == "quoted-role-policy" {
+					if assert.Len(t, policy.Roles, 1) {
+						assert.Equal(t, quotedRole, policy.Roles[0].Name)
+					}
+					return
+				}
+			}
+			t.Fatal("quoted-role-policy missing from expanded policies")
 		})
 
 		t.Run("Delete", func(t *testing.T) {
@@ -2018,6 +2060,7 @@ func TestServer(t *testing.T) {
 					http.StatusConflict,
 				)
 			})
+
 		})
 
 		// do some preliminary setup so we have a policy to work with
@@ -2552,6 +2595,16 @@ func TestServer(t *testing.T) {
 
 	t.Run("Group", func(t *testing.T) {
 		tearDown := testSetup(t)
+
+		t.Run("UsersInjection", func(t *testing.T) {
+			w := httptest.NewRecorder()
+			body := []byte(`{"name":"test-group-users-injection","users":["x'); DROP TABLE usr; --"]}`)
+			handler.ServeHTTP(w, newRequest("POST", "/group", bytes.NewBuffer(body)))
+			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			w = httptest.NewRecorder()
+			handler.ServeHTTP(w, newRequest("GET", "/user", nil))
+			assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		})
 
 		t.Run("NotFound", func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -4535,19 +4588,28 @@ func TestServer(t *testing.T) {
 					}
 				})
 
-				t.Run("Policies", func(t *testing.T) {
+				t.Run("PoliciesInBodyIgnored", func(t *testing.T) {
+					otherUser := "policies-ignored-other-user"
+					secretPath := "/policies-ignored-secret"
+					secretPolicy := "policies-ignored-secret-policy"
+					createUserBytes(t, []byte(fmt.Sprintf(`{"name": "%s"}`, otherUser)))
+					createResourceBytes(t, []byte(fmt.Sprintf(`{"path": "%s"}`, secretPath)))
+					createPolicyBytes(t, []byte(fmt.Sprintf(
+						`{"id": "%s", "resource_paths": ["%s"], "role_ids": ["%s"]}`,
+						secretPolicy, secretPath, roleName,
+					)))
+					grantUserPolicy(t, otherUser, secretPolicy, "null")
 					w := httptest.NewRecorder()
 					body := []byte(fmt.Sprintf(
 						`{"user": {"token": "%s", "policies": ["%s"]}}`,
 						token.Encode(),
-						policyName,
+						secretPolicy,
 					))
 					req := newRequest("POST", "/auth/resources", bytes.NewBuffer(body))
 					handler.ServeHTTP(w, req)
 					if w.Code != http.StatusOK {
 						httpError(t, w, "auth resources request failed")
 					}
-					// in this case, since the user has zero access yet, should be empty
 					result := struct {
 						Resources []string `json:"resources"`
 					}{}
@@ -4555,8 +4617,11 @@ func TestServer(t *testing.T) {
 					if err != nil {
 						httpError(t, w, "couldn't read response from auth resources")
 					}
-					msg := fmt.Sprintf("got response body: %s", w.Body.String())
-					assert.Equal(t, []string{resourcePath}, result.Resources, msg)
+					assert.NotContains(t, result.Resources, secretPath)
+					expected := append([]string{resourcePath}, anonymousResourcePaths...)
+					expected = append(expected, loggedInResourcePaths...)
+					assert.ElementsMatch(t, expected, result.Resources)
+					revokeUserPolicy(t, otherUser, secretPolicy)
 				})
 
 				t.Run("GET_noDuplicatedMappings", func(t *testing.T) {

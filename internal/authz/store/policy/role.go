@@ -120,21 +120,19 @@ func roleWithName(db *sqlx.DB, name string) (*RoleFromQuery, error) {
 }
 
 func rolesWithNames(db *sqlx.DB, roleNames []string) ([]RoleFromQuery, error) {
-	roleNamesString := "'" + strings.Join(roleNames, "','") + "'"
-	stmtFormat := `
+	stmt := `
 		SELECT
 			role.id,
 			role.name,
 			array_remove(array_agg((permission.name, permission.service, permission.method, permission.constraints)), (NULL::text,NULL::text,NULL::text,NULL::jsonb)) AS permissions
 		FROM role
 		LEFT JOIN permission ON permission.role_id = role.id
-		WHERE role.name IN (%s)
+		WHERE role.name = ANY($1)
 		GROUP BY role.id
 	`
-	stmt := fmt.Sprintf(stmtFormat, roleNamesString)
 
 	roles := []RoleFromQuery{}
-	err := db.Select(&roles, stmt)
+	err := db.Select(&roles, stmt, pq.Array(roleNames))
 	if err != nil {
 		return nil, err
 	}

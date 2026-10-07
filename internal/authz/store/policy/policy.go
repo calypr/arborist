@@ -227,8 +227,8 @@ func (policy *Policy) resources(tx *sqlx.Tx) ([]resource.ResourceFromQuery, erro
 	for i, path := range policy.ResourcePaths {
 		queryPaths[i] = coreauthz.FormatPathForDb(path)
 	}
-	resourcesStmt := coreauthz.SelectInStmt("resource", "ltree2text(path)", queryPaths)
-	err := tx.Select(&resources, resourcesStmt)
+	resourcesStmt, resourcesArg := coreauthz.SelectInStmt("resource", "ltree2text(path)", queryPaths)
+	err := tx.Select(&resources, resourcesStmt, resourcesArg)
 	if err != nil {
 		return nil, err
 	}
@@ -239,8 +239,8 @@ func (policy *Policy) resources(tx *sqlx.Tx) ([]resource.ResourceFromQuery, erro
 // returned, resulted from the database operation.
 func (policy *Policy) roles(tx *sqlx.Tx) ([]RoleFromQuery, error) {
 	roles := []RoleFromQuery{}
-	rolesStmt := coreauthz.SelectInStmt("role", "name", policy.RoleIDs)
-	err := tx.Select(&roles, rolesStmt)
+	rolesStmt, rolesArg := coreauthz.SelectInStmt("role", "name", policy.RoleIDs)
+	err := tx.Select(&roles, rolesStmt, rolesArg)
 	if err != nil {
 		return nil, err
 	}
